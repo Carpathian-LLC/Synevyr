@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{% block title %}Synevyr{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+</head>
+<body class="bg-gray-900 text-white font-sans">
+  <header class="bg-gray-800 px-6 py-4 flex justify-between items-center border-b border-gray-700">
+    <a href="/" class="text-xl font-bold text-white hover:text-blue-400">Synevyr</a>
+    <nav class="flex gap-4">
+      <a href="/" class="hover:text-blue-400">Home</a>
+      <a href="/dashboard" class="hover:text-blue-400">Dashboard</a>
+    </nav>
+  </header>
+  <main class="p-8 max-w-4xl mx-auto">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

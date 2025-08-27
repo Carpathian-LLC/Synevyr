@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Synevyr API Gateway</title>
+  <style>
+    /* Global styles */
+    body {
+      background: #000; /* Fallback background color */
+      color: #e0e0e0;
+      font-family: "Inter", sans-serif;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Video Background */
+    #bgVideo {
+      position: fixed;
+      top: 0;
+      left: 0;
+      min-width: 100%;
+      min-height: 100%;
+      width: auto;
+      height: auto;
+      z-index: -1;
+      object-fit: cover;
+    }
+
+    /* Dark overlay */
+    #videoOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5); /* Adjust opacity (0.5 = 50% darkness) */
+    z-index: -1;
+    }
+
+    /* Glassmorphism container */
+    .status-container {
+      background: rgba(0, 70, 79, 0.26);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-radius: 25px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 30px;
+      max-width: 500px;
+      text-align: center;
+      position: relative;
+      box-shadow: 0 0 20px rgba(65, 255, 71, 0.643),
+                  0 0 40px rgba(2, 200, 255, 0.692);
+      animation: glowPulse 6s infinite alternate ease-in-out;
+    }
+
+    @keyframes glowPulse {
+      0% { 
+        box-shadow: 0 0 25px rgba(0, 140, 255, 0.4),
+                    0 0 50px rgba(43, 226, 92, 0.4);
+      }
+      100% { 
+        box-shadow: 0 0 30px rgba(0, 140, 255, 0.7),
+                    0 0 60px rgba(4, 255, 88, 0.7);
+      }
+    }
+
+    /* Status text */
+    .status {
+      font-size: 1.2em;
+      font-weight: bold;
+      margin-top: 15px;
+    }
+
+    .online { color: #16c60c; }  /* Green */
+    .offline { color: #ff4444; } /* Red */
+
+    /* Links */
+    .back-link, .api-docs {
+      display: inline-block;
+      margin-top: 15px;
+      padding: 12px 25px;
+      font-size: 1.1em;
+      color: #e0e0e0;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      text-decoration: none;
+      border-radius: 6px;
+      transition: all 0.3s ease;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .back-link:hover, .api-docs:hover {
+      background: rgba(255, 255, 255, 0.2);
+      text-decoration: none;
+    }
+
+    /* Enlarged logo */
+    .logo {
+      width: 300px;
+      height: auto;
+      margin-bottom: 15px;
+    }
+
+    .version {
+      font-size: 0.8em;
+
+    }
+    .button-row {
+    display: flex;
+    justify-content: center;
+    gap: 16px; /* adjust spacing between buttons */
+    margin-top: 15px; /* matches your existing vertical spacing */
+  }
+
+    
+  </style>
+  <script>
+    function checkCarpathianStatus() {
+      const statusElement = document.getElementById("carpathian-status");
+      const cacheBuster = Date.now();
+      const script = document.createElement("script");
+      script.src = `https://synevyr.org?cb=${cacheBuster}`;
+      script.async = true;
+      script.onload = function() {
+         statusElement.innerHTML = "Online";
+         statusElement.classList.add("online");
+         statusElement.classList.remove("offline");
+         document.head.removeChild(script);
+      };
+      script.onerror = function() {
+         statusElement.innerHTML = "Offline";
+         statusElement.classList.add("offline");
+         statusElement.classList.remove("online");
+         document.head.removeChild(script);
+      };
+      document.head.appendChild(script);
+    }
+    window.onload = checkCarpathianStatus;
+    setInterval(checkCarpathianStatus, 15000); // Check every 15 seconds
+
+
+  async function loadBackendVersion() {
+    try {
+      const res = await fetch("/meta/version?type=backend");
+      if (!res.ok) throw new Error("Failed to fetch version");
+      const data = await res.json();
+      document.getElementById("backend-version").textContent = data.backend_version;
+    } catch (err) {
+      document.getElementById("backend-version").textContent = "Unavailable";
+      console.error("Version fetch error:", err);
+    }
+  }
+
+  window.onload = () => {
+    checkCarpathianStatus();
+    loadBackendVersion();
+  };
+
+  </script>
+</head>
+<body>
+  <!-- Video Background -->
+  <video id="bgVideo" autoplay muted loop>
+    <source src="/static/videos/api-gateway-bg.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
+  <div id="videoOverlay"></div>
+  
+  <section class="status-container">
+      <img src="/static/images/synevyr-crm-dark.png" alt="Synevyr Logo" class="logo">
+      <h1>API Gateway</h1>
+      <p>Did you mean to come here? This is a backend API gateway. If you need help using the API, please check out the documentation below.</p>
+      <p class="status">Main Site: <span id="carpathian-status">Checking...</span></p>
+      <p class="status">API Status: <span class="online">Online</span></p>
+      <br>
+      <br>
+      <div class="button-row">
+        <a href="https://synevyr.org/documentation" class="api-docs">Developer Resources</a>
+        <a href="https://synevyr.org" class="back-link">Return to Main Site</a>
+      </div>
+
+       <div>
+        <br>
+      <p class="version">Backend Version: <span id="backend-version">Loading…</span></p>
+
+  </div>
+  </section>
+
+</body>
+</html>

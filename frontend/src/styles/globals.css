@@ -1,0 +1,190 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Glassmorphic Effect */
+.glass {
+  backdrop-filter: blur(15px);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  padding: 20px;
+  transition: all 0.3s ease;
+}
+
+.glass:hover {
+  background: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
+}
+
+.cta-button-light {
+  background-color: #ffffffe5;
+  color: black;
+  padding: 0.75rem 1.5rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  text-align: center;
+  display: inline-block;
+  transition: box-shadow 0.2s ease-in-out;
+  animation: glowEffectSubdued 3s infinite linear, pulseWave 1.5s infinite ease-in-out;
+  box-shadow: 0 0 15px #fb04d6, 0 0 30px #fb04d6;
+  position: relative;
+  overflow: hidden;
+}
+
+.cta-button-dark {
+  background-color: #000;
+  color: white;
+  padding: 0.75rem 1.5rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  text-align: center;
+  display: inline-block;
+  transition: box-shadow 0.2s ease-in-out;
+  animation: glowEffectSubdued 3s infinite linear, pulseWave 1.5s infinite ease-in-out;
+  box-shadow: 0 0 15px #fb04d6, 0 0 30px #fb04d6;
+  position: relative;
+  overflow: hidden;
+}
+/* Creating a moving gradient glow effect under the button */
+.cta-button::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 250%;
+  height: 250%;
+  background: black;
+  color: white;
+}
+
+.cta-box-subdued {
+  transition: box-shadow 0.2s ease-in-out;
+  animation: glowEffectSubdued 3s infinite linear, pulseWave 1.5s infinite ease-in-out;
+  box-shadow: 0 0 15px #fb04d6, 0 0 30px #fb04d6;
+}
+
+
+@keyframes glowEffectSubdued {
+  0% {
+    box-shadow: 0 0 15px #447fff50, 0 0 30px #447fff50;
+  }
+  25% {
+    box-shadow: 0 0 15px #94e3ff50, 0 0 30px #94e3ff50;
+  }
+  50% {
+    box-shadow: 0 0 15px #ff76d150, 0 0 30px #ff8bd850;
+  }
+  75% {
+    box-shadow: 0 0 15px #7d2cff50, 0 0 30px #7d2cff50;
+  }
+  100% {
+    box-shadow: 0 0 15px #447fff50, 0 0 30px #447fff50;
+  }
+}
+
+/* Smooth glowing effect */
+@keyframes glowEffect {
+  0% {
+    box-shadow: 0 0 15px #fb04d665, 0 0 30px #fb04d6;
+  }
+  25% {
+    box-shadow: 0 0 15px #fb00ff, 0 0 30px #fb00ff;
+  }
+  50% {
+    box-shadow: 0 0 15px #ff00aa, 0 0 30px #ff00aa;
+  }
+  75% {
+    box-shadow: 0 0 15px #0948d9, 0 0 30px #0948d9;
+  }
+  100% {
+    box-shadow: 0 0 15px #fb04d6, 0 0 30px #fb04d6;
+  }
+}
+
+/* Creates a wave-like motion effect */
+@keyframes waveMotion {
+  0% {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  100% {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+@keyframes radiant-gradient {
+  0% {
+    background-position: 45% 50%;
+  }
+  20% {
+    background-position: 55% 60%;
+  }
+  40% {
+    background-position: 35% 40%;
+  }
+  60% {
+    background-position: 65% 50%;
+  }
+  80% {
+    background-position: 50% 65%;
+  }
+  100% {
+    background-position: 45% 50%;
+  }
+}
+
+.animate-gradient-radiant {
+  background-image: linear-gradient(
+    135deg,
+    #7f1d1d,    /* deep red */
+    #dc2626,    /* vivid red */
+    #f87171,    /* soft red */
+    #ffffff,    /* white core */
+    #7f1d1d     /* loop back to deep red */
+  );
+  background-size: 400% 400%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: radiant-gradient 12s ease-in-out infinite;
+}
+
+@keyframes slide-down {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-down {
+  animation: slide-down 0.25s ease-out forwards;
+}

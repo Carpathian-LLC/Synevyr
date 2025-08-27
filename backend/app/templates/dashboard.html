@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<section class="text-center mb-8">
+  <h1 class="text-3xl font-bold mb-2">Dashboard</h1>
+  <p class="text-gray-300">Customer source, spend &amp; tenure</p>
+</section>
+
+<div id="summary-cards" class="card-grid mb-12"></div>
+
+<!-- Existing charts -->
+<section class="mb-12">
+  <h2 class="text-xl font-semibold mb-4 text-center">Total Spend by Source</h2>
+  <canvas id="spendChart" class="chart-container"></canvas>
+</section>
+
+<section class="mb-12">
+  <h2 class="text-xl font-semibold mb-4 text-center">Avg Tenure by Source</h2>
+  <canvas id="tenureChart" class="chart-container"></canvas>
+</section>
+
+<section class="mb-12">
+  <h2 class="text-xl font-semibold mb-4 text-center">Exit Rate by Source (%)</h2>
+  <canvas id="exitChart" class="chart-container"></canvas>
+</section>
+
+<!-- New charts -->
+<section class="mb-12">
+  <h2 class="text-xl font-semibold mb-4 text-center">Customer Count by Source</h2>
+  <canvas id="countChart" class="chart-container"></canvas>
+</section>
+
+<section class="mb-12">
+  <h2 class="text-xl font-semibold mb-4 text-center">Avg LTV by Source</h2>
+  <canvas id="ltvChart" class="chart-container"></canvas>
+</section>
+
+<section class="mb-12">
+  <h2 class="text-xl font-semibold mb-4 text-center">Spend vs Tenure (Scatter)</h2>
+  <canvas id="scatterChart" class="chart-container"></canvas>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+async function loadDashboard() {
+  const res = await fetch('/public/analytics?table=customer_analysis&page_size=500');
+  const json = await res.json();
+  const data = json.data || [];
+
+  // ---- aggregation ----
+  const group = {};
+  data.forEach(d => {
+    const src = d.source || 'Unknown';
+    if (!group[src]) group[src] = { count: 0, exits: 0, spend: 0, tenure: 0 };
+    group[src].count++;
+    if (d.unsubscribed_on) group[src].exits++;
+    group[src].spend  += parseFloat(d.total_spend) || 0;
+    group[src].tenure += parseFloat(d.cx_tenure)  || 0;
+  });
+
+  const sources      = Object.keys(group);
+  const totalSpend   = sources.map(s => group[s].spend);
+  const avgTenure    = sources.map(s => group[s].tenure / group[s].count);
+  const exitRate     = sources.map(s => (group[s].exits / group[s].count) * 100);
+  const counts       = sources.map(s => group[s].count);
+  const avgLTV       = sources.map(s => group[s].spend / group[s].count);
+
+  // ---- summary cards ----
+  const totalCustomers = data.length;
+  const avgTenureAll   = totalCustomers
+    ? data.reduce((sum, d) => sum + (parseFloat(d.cx_tenure) || 0), 0) / totalCustomers
+    : 0;
+  const avgLTVAll      = totalCustomers
+    ? totalSpend.reduce((a, b) => a + b, 0) / totalCustomers
+    : 0;
+
+  const summary = [
+    { label: 'Total Customers',  value: totalCustomers },
+    { label: 'Avg Tenure (days)', value: Math.round(avgTenureAll) },
+    { label: 'Avg LTV',          value: '$' + avgLTVAll.toFixed(2) }
+  ];
+  const summaryEl = document.getElementById('summary-cards');
+  summary.forEach(item => {
+    const card      = document.createElement('div');
+    card.className  = 'card';
+    card.innerHTML  =
+      `<div class="metric-value">${item.value}</div>` +
+      `<div class="metric-label">${item.label}</div>`;
+    summaryEl.appendChild(card);
+  });
+
+  // ---- charts ----
+  const ctxSpend   = document.getElementById('spendChart').getContext('2d');
+  const ctxTenure  = document.getElementById('tenureChart').getContext('2d');
+  const ctxExit    = document.getElementById('exitChart').getContext('2d');
+  const ctxCount   = document.getElementById('countChart').getContext('2d');
+  const ctxLtv     = document.getElementById('ltvChart').getContext('2d');
+  const ctxScatter = document.getElementById('scatterChart').getContext('2d');
+
+  new Chart(ctxSpend, {
+    type: 'bar',
+    data: { labels: sources, datasets: [{ data: totalSpend, backgroundColor: '#3b82f6' }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
+
+  new Chart(ctxTenure, {
+    type: 'bar',
+    data: { labels: sources, datasets: [{ data: avgTenure, backgroundColor: '#10b981' }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
+
+  new Chart(ctxExit, {
+    type: 'bar',
+    data: { labels: sources, datasets: [{ data: exitRate, backgroundColor: '#f59e0b' }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
+
+  new Chart(ctxCount, {
+    type: 'bar',
+    data: { labels: sources, datasets: [{ data: counts, backgroundColor: '#ef4444' }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
+
+  new Chart(ctxLtv, {
+    type: 'bar',
+    data: { labels: sources, datasets: [{ data: avgLTV, backgroundColor: '#22c55e' }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
+
+  // scatter: each point = one customer (tenure vs spend)
+  const scatterData = data.map(d => ({
+    x: parseFloat(d.cx_tenure) || 0,
+    y: parseFloat(d.total_spend) || 0
+  }));
+
+  new Chart(ctxScatter, {
+    type: 'scatter',
+    data: { datasets: [{ label: 'Customer', data: scatterData, pointRadius: 3 }] },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { title: { display: true, text: 'Tenure (days)' }, beginAtZero: true },
+        y: { title: { display: true, text: 'Total Spend' },  beginAtZero: true }
+      }
+    }
+  });
+
+  // raw data (optional debugging)
+  if (document.getElementById('api-data'))
+    document.getElementById('api-data').textContent = JSON.stringify(data, null, 2);
+}
+
+loadDashboard();
+</script>
+{% endblock %}

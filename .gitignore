@@ -1,0 +1,15 @@
+*.env
+*.log
+*.pyc
+*.cfg
+*.DS_Store
+__pycache__
+.synevyr_venv
+synevyr_venv
+session_files
+static/.DS_Store
+bootstrap_checklist.txt
+backend/celerybeat-schedule 
+backend/celerybeat-schedule-shm 
+backend/celerybeat-schedule-wal
+bootstrap_checklist.txt
