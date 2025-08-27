@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------------
 # Developed by Carpathian, LLC.
 # ------------------------------------------------------------------------------------
-# Legal Notice: Distribution Authorized.
+# Legal Notice: Distribution Not Authorized.
 # ------------------------------------------------------------------------------------
 # Notes:
 # - routes for all the general home pages

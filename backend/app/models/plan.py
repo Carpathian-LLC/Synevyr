@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------------
 # Developed by Carpathian, LLC.
 # ------------------------------------------------------------------------------------
-# Legal Notice: Distribution Authorized.
+# Legal Notice: Distribution Not Authorized.
 # ------------------------------------------------------------------------------------
 # Notes:
 # - All classes related to plans and packages (small for now but will make future mngt easier and centralized)

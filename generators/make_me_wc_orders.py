@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------------
 # Developed by Carpathian, LLC.
 # ------------------------------------------------------------------------------------
-# Legal Notice: Distribution Authorized.
+# Legal Notice: Distribution Not Authorized.
 # ------------------------------------------------------------------------------------
 # Description:
 # -> Populates `wc_orders` with simulated ecommerce transactions by source type <-

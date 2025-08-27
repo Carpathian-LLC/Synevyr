@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------------
 # Developed by Carpathian, LLC.
 # ------------------------------------------------------------------------------------
-# Legal Notice: Distribution Authorized.
+# Legal Notice: Distribution Not Authorized.
 # ------------------------------------------------------------------------------------
 # Description:
 # -> Populates all key analytics tables with synthetic customer, lead, and order data <-

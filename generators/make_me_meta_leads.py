@@ -1,7 +1,7 @@
 # ------------------------------------------------------------------------------------
 # Developed by Carpathian, LLC.
 # ------------------------------------------------------------------------------------
-# Legal Notice: Distribution Authorized.
+# Legal Notice: Distribution Not Authorized.
 # ------------------------------------------------------------------------------------
 # Description:
 # -> Populates `meta_leads` with a blend of real and fake lead data for ad analysis <-

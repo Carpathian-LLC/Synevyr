@@ -1,9 +1,8 @@
 # ------------------------------------------------------------------------------------
-# Developed by Carpathian, LLC. in partnership with MalkasianGroup, LLC
+# Developed by Carpathian, LLC.
 # ------------------------------------------------------------------------------------
 # Legal Notice: 
-# Distribution Not Authorized without written permission. 
-# For usage inquiries, email malkasian@carpathian.ai
+# Distribution Not Authorized
 # ------------------------------------------------------------------------------------
 # DISCLAIMER:
 # This program is for research purposes only. All of the information generated is random and any 
