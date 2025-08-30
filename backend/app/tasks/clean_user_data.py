@@ -307,6 +307,17 @@ def build_source_metrics_daily_task(self, _previous_result=None):
                         "churn_customers": 0,
                         "total_customers": 0,
                         "exits_total": 0,
+                        "new_customers": 0,
+                        "repeat_customers": 0,
+                        "subscription_revenue_cents": 0,
+                        "average_order_value_cents": 0,
+                        "high_value_orders": 0,  # orders > $100
+                        "orders_value_sum_cents": 0,  # for AOV calculation
+                        "customer_lifetime_days": 0,  # total days all customers active
+                        "active_customers": 0,  # currently active
+                        "reactivated_customers": 0,  # came back from churn
+                        "at_risk_customers": 0,  # showing decline signs
+                        "customer_emails": set(),  # track unique customers for LTV
                     }
 
                 bucket = agg[key]
@@ -325,17 +336,82 @@ def build_source_metrics_daily_task(self, _previous_result=None):
                     totals["customer_rows"] += 1
                     bucket["customers"] += 1
                     bucket["total_customers"] += 1
-                    if _customer_status(payload) in {"inactive", "cancelled", "canceled", "churned", "deleted"}:
+                    
+                    # Customer lifecycle analysis
+                    customer_email = payload.get("email")
+                    customer_status = _customer_status(payload)
+                    created_date = _parse_dt(payload.get("created_at"), created_dt)
+                    unsub_date = _parse_dt(payload.get("unsubscribed_on"), None)
+                    
+                    if customer_email:
+                        bucket["customer_emails"].add(customer_email)
+                    
+                    # Calculate customer lifetime if we have dates
+                    if created_date and unsub_date:
+                        lifetime_days = (unsub_date - created_date).days
+                        bucket["customer_lifetime_days"] += max(0, lifetime_days)
+                    elif created_date:
+                        # Active customer - calculate days since signup
+                        days_active = (created_dt - created_date).days
+                        bucket["customer_lifetime_days"] += max(0, days_active)
+                    
+                    # Customer status categorization
+                    if customer_status in {"inactive", "cancelled", "canceled", "churned", "deleted"}:
                         bucket["churn_customers"] += 1
                         bucket["exits_total"] += 1
+                    elif customer_status in {"active", "subscribed"}:
+                        bucket["active_customers"] += 1
+                    elif customer_status in {"reactivated", "winback"}:
+                        bucket["reactivated_customers"] += 1
+                    elif customer_status in {"at-risk", "declining", "low-engagement"}:
+                        bucket["at_risk_customers"] += 1
+                    
+                    # Check if this looks like a subscription customer
+                    if any(term in str(payload.get("activity_status", "")).lower() for term in ["subscription", "recurring", "monthly", "yearly"]):
+                        # Estimate subscription value
+                        total_spend = _to_cents(payload.get("total_spend", 0))
+                        bucket["subscription_revenue_cents"] += total_spend
 
                 elif t == "woo":
                     totals["woo_rows"] += 1
                     st = _order_status(payload)
+                    order_total_cents = _to_cents(payload.get("total", 0))
+                    customer_id = payload.get("customer_id")
+                    customer_email = None
+                    
+                    # Extract customer email from billing info
+                    billing_info = payload.get("billing")
+                    if isinstance(billing_info, dict):
+                        customer_email = billing_info.get("email")
+                    elif isinstance(billing_info, str):
+                        try:
+                            import json
+                            billing_json = json.loads(billing_info)
+                            customer_email = billing_json.get("email")
+                        except:
+                            pass
+                    
                     if st in ORDER_OK:
                         bucket["orders"] += 1
-                        bucket["revenue_cents"] += _to_cents(payload.get("total"))
+                        bucket["revenue_cents"] += order_total_cents
+                        bucket["orders_value_sum_cents"] += order_total_cents
                         totals["orders_ok"] += 1
+                        
+                        # High-value order analysis
+                        if order_total_cents >= 10000:  # $100+
+                            bucket["high_value_orders"] += 1
+                        
+                        # Customer repeat behavior analysis
+                        if customer_email:
+                            bucket["customer_emails"].add(customer_email)
+                            # Check if this is a repeat customer by looking for multiple orders
+                            # This is simplified - in reality you'd need to track across all time
+                        
+                        # Subscription detection in orders
+                        line_items = payload.get("line_items", "")
+                        if any(term in str(line_items).lower() for term in ["subscription", "monthly", "yearly", "recurring"]):
+                            bucket["subscription_revenue_cents"] += order_total_cents
+                        
                     if st in ORDER_CANCEL_OR_EXIT:
                         bucket["exits_total"] += 1
                         totals["orders_cancel_or_exit"] += 1
@@ -348,6 +424,31 @@ def build_source_metrics_daily_task(self, _previous_result=None):
                 f"processed={totals['processed']} skipped_no_time={totals['skipped_no_time']} skipped_unknown={totals['skipped_unknown']}"
             )
 
+            # --- Calculate final metrics before upserting ---
+            for (user_id, day_iso, source_label), vals in agg.items():
+                # Calculate average order value
+                if vals["orders"] > 0:
+                    vals["average_order_value_cents"] = int(vals["orders_value_sum_cents"] / vals["orders"])
+                else:
+                    vals["average_order_value_cents"] = 0
+                
+                # Convert customer_emails set to count for unique customers
+                unique_customers = len(vals["customer_emails"])
+                vals["unique_customers"] = unique_customers
+                
+                # Calculate average customer lifetime
+                if unique_customers > 0:
+                    vals["avg_customer_lifetime_days"] = int(vals["customer_lifetime_days"] / unique_customers)
+                else:
+                    vals["avg_customer_lifetime_days"] = 0
+                
+                # Remove the set as it can't be stored in DB
+                del vals["customer_emails"]
+                
+                # Add derived metrics
+                vals["conversion_rate_pct"] = (vals["orders"] / vals["leads"] * 100) if vals["leads"] > 0 else 0
+                vals["customer_retention_pct"] = ((vals["total_customers"] - vals["churn_customers"]) / vals["total_customers"] * 100) if vals["total_customers"] > 0 else 0
+            
             # --- Upsert aggregated counters ---
             upserts = 0
             try:
@@ -364,6 +465,19 @@ def build_source_metrics_daily_task(self, _previous_result=None):
                         churn_customers=vals["churn_customers"],
                         total_customers=vals["total_customers"],
                         exits_total=vals["exits_total"],
+                        new_customers=vals["new_customers"],
+                        repeat_customers=vals["repeat_customers"],
+                        unique_customers=vals["unique_customers"],
+                        active_customers=vals["active_customers"],
+                        reactivated_customers=vals["reactivated_customers"],
+                        at_risk_customers=vals["at_risk_customers"],
+                        subscription_revenue_cents=vals["subscription_revenue_cents"],
+                        average_order_value_cents=vals["average_order_value_cents"],
+                        high_value_orders=vals["high_value_orders"],
+                        avg_customer_lifetime_days=vals["avg_customer_lifetime_days"],
+                        customer_lifetime_days=vals["customer_lifetime_days"],
+                        conversion_rate_pct=vals["conversion_rate_pct"],
+                        customer_retention_pct=vals["customer_retention_pct"],
                         created_at=datetime.now(),
                         updated_at=datetime.now(),
                     )
@@ -376,6 +490,19 @@ def build_source_metrics_daily_task(self, _previous_result=None):
                         churn_customers=SourceMetricsDaily.churn_customers + ins.inserted.churn_customers,
                         total_customers=SourceMetricsDaily.total_customers + ins.inserted.total_customers,
                         exits_total=SourceMetricsDaily.exits_total + ins.inserted.exits_total,
+                        new_customers=SourceMetricsDaily.new_customers + ins.inserted.new_customers,
+                        repeat_customers=SourceMetricsDaily.repeat_customers + ins.inserted.repeat_customers,
+                        unique_customers=SourceMetricsDaily.unique_customers + ins.inserted.unique_customers,
+                        active_customers=SourceMetricsDaily.active_customers + ins.inserted.active_customers,
+                        reactivated_customers=SourceMetricsDaily.reactivated_customers + ins.inserted.reactivated_customers,
+                        at_risk_customers=SourceMetricsDaily.at_risk_customers + ins.inserted.at_risk_customers,
+                        subscription_revenue_cents=SourceMetricsDaily.subscription_revenue_cents + ins.inserted.subscription_revenue_cents,
+                        average_order_value_cents=ins.inserted.average_order_value_cents,  # Replace rather than add for AOV
+                        high_value_orders=SourceMetricsDaily.high_value_orders + ins.inserted.high_value_orders,
+                        avg_customer_lifetime_days=ins.inserted.avg_customer_lifetime_days,  # Replace rather than add for average
+                        customer_lifetime_days=SourceMetricsDaily.customer_lifetime_days + ins.inserted.customer_lifetime_days,
+                        conversion_rate_pct=ins.inserted.conversion_rate_pct,  # Replace rather than add for percentage
+                        customer_retention_pct=ins.inserted.customer_retention_pct,  # Replace rather than add for percentage
                         updated_at=datetime.now(),
                     )
                     db.session.execute(ondup)

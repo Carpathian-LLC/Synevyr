@@ -3,10 +3,21 @@
 # ------------------------------------------------------------------------------------
 # Legal Notice: Distribution Not Authorized.
 # ------------------------------------------------------------------------------------
-# Notes:
-# - All classes related to user management
-
-# THESE NEED TO BE ADDED TO init_db.
+# 🏢 PLATFORM MODELS - Synevyr System Users & Customers
+# ------------------------------------------------------------------------------------
+# These models represent Synevyr's platform users (people who use the Synevyr app)
+# and platform customers (people who pay for Synevyr subscriptions).
+# 
+# NOT to be confused with dataset models (user_customers, etc.) which represent
+# the customer data that platform users upload for analysis.
+#
+# Platform Models in this file:
+# - User: Synevyr platform users (login accounts)
+# - GuestUser: Anonymous visitors to Synevyr
+# - Customer: Synevyr paying customers (Stripe integration)
+# - UserCustomer: Dataset table for synthetic customer data (analysis data)
+# - Referral: Platform referral system
+# ------------------------------------------------------------------------------------
 
 # ------------------------------------------------------------------------------------
 # Imports:
@@ -157,6 +168,27 @@ class Customer(db.Model):
 
     def __repr__(self):
         return f"<Customer(id={self.id}, email='{self.email}')>"
+
+# UserCustomer (for synthetic data generation)
+class UserCustomer(db.Model):
+    __tablename__ = 'user_customers'
+
+    id = db.Column(db.BigInteger, primary_key=True, autoincrement=True)
+    first_name = db.Column(db.String(255), nullable=True)
+    last_name = db.Column(db.String(255), nullable=True)
+    email = db.Column(db.String(255), unique=True, nullable=True)
+    phone = db.Column(db.String(50), nullable=True)
+    address = db.Column(db.String(255), nullable=True)
+    city = db.Column(db.String(255), nullable=True)
+    state = db.Column(db.String(255), nullable=True)
+    country = db.Column(db.String(255), nullable=True)
+    zipcode = db.Column(db.String(255), nullable=True)
+    activity_status = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.Date, nullable=True)
+    referrer = db.Column(db.String(255), nullable=True)
+
+    def __repr__(self):
+        return f"<UserCustomer(id={self.id}, email='{self.email}')>"
 
 class Referral(db.Model):
     __tablename__ = "referrals"

@@ -32,8 +32,22 @@ type SourceMetricsItem = {
   churn_customers: number;
   total_customers: number;
   exits_total: number;
-  roi_pct: number;   // computed by backend
-  churn_pct: number; // computed by backend
+  new_customers: number;
+  repeat_customers: number;
+  unique_customers: number;
+  active_customers: number;
+  reactivated_customers: number;
+  at_risk_customers: number;
+  subscription_revenue_cents: number;
+  high_value_orders: number;
+  total_customer_lifetime_days: number;
+  avg_customer_lifetime_days: number;
+  roi_pct: number;
+  churn_pct: number;
+  avg_order_value_cents: number;
+  conversion_rate_pct: number;
+  customer_retention_pct: number;
+  customer_ltv: number;
 };
 
 type SourceMetricsTotals = {
@@ -45,8 +59,24 @@ type SourceMetricsTotals = {
   churn_customers: number;
   total_customers: number;
   exits_total: number;
+  new_customers: number;
+  repeat_customers: number;
+  unique_customers: number;
+  active_customers: number;
+  reactivated_customers: number;
+  at_risk_customers: number;
+  subscription_revenue_cents: number;
+  high_value_orders: number;
+  total_customer_lifetime_days: number;
+  avg_order_value_cents: number;
+  avg_customer_lifetime_days: number;
+  customer_ltv: number;
   roi_pct: number;
   churn_pct: number;
+  conversion_rate_pct: number;
+  customer_retention_pct: number;
+  high_value_order_pct: number;
+  subscription_revenue_pct: number;
 };
 
 type SourceMetricsResponse = {
@@ -77,10 +107,17 @@ function toNumber(x: unknown): number {
 
 function isSourceMetricsItem(x: unknown): x is SourceMetricsItem {
   if (!isRecord(x)) return false;
+  const requiredNumbers = [
+    "leads", "customers", "orders", "revenue_cents", "cost_cents", "churn_customers",
+    "total_customers", "exits_total", "new_customers", "repeat_customers", 
+    "unique_customers", "active_customers", "reactivated_customers", "at_risk_customers",
+    "subscription_revenue_cents", "high_value_orders", "total_customer_lifetime_days",
+    "avg_customer_lifetime_days", "roi_pct", "churn_pct", "avg_order_value_cents",
+    "conversion_rate_pct", "customer_retention_pct", "customer_ltv"
+  ];
   return (
     isString(x.source_label) &&
-    [ "leads","customers","orders","revenue_cents","cost_cents","churn_customers","total_customers","exits_total","roi_pct","churn_pct" ]
-      .every((k) => isNumber((x as Record<string, unknown>)[k]))
+    requiredNumbers.every((k) => isNumber((x as Record<string, unknown>)[k]))
   );
 }
 
@@ -128,6 +165,20 @@ function fmtPct(n: number): string {
   return `${v.toFixed(1)}%`;
 }
 
+function fmtDays(n: number): string {
+  const v = Number.isFinite(n) ? n : 0;
+  if (v === 0) return "0 days";
+  if (v === 1) return "1 day";
+  if (v < 30) return `${Math.round(v)} days`;
+  if (v < 365) return `${Math.round(v / 30)} months`;
+  return `${(v / 365).toFixed(1)} years`;
+}
+
+function fmtNumber(n: number): string {
+  const v = Number.isFinite(n) ? n : 0;
+  return v.toLocaleString();
+}
+
 /* ----------------------------- Components ----------------------------- */
 
 export default function Dashboard(): JSX.Element {
@@ -146,6 +197,10 @@ export default function Dashboard(): JSX.Element {
   const roiRef = useRef<HTMLCanvasElement | null>(null);
   const churnRef = useRef<HTMLCanvasElement | null>(null);
   const funnelRef = useRef<HTMLCanvasElement | null>(null);
+  const aovRef = useRef<HTMLCanvasElement | null>(null);
+  const conversionRef = useRef<HTMLCanvasElement | null>(null);
+  const ltvRef = useRef<HTMLCanvasElement | null>(null);
+  const lifetimeRef = useRef<HTMLCanvasElement | null>(null);
   const chartsRef = useRef<Chart<"bar", number[], string>[]>([]);
 
   // fetch analytics (cleaned data)
@@ -186,10 +241,22 @@ export default function Dashboard(): JSX.Element {
     leads,
     customers,
     orders,
+    avgOrderValues,
+    conversionRates,
+    customerLifetimeDays,
+    customerLTVs,
     kpiTotalRevenue,
     kpiTotalOrders,
+    kpiTotalCustomers,
+    kpiAvgLTV,
+    kpiAvgCustomerLifetime,
+    kpiConversionRate,
+    kpiRetentionRate,
+    kpiSubscriptionRevenue,
     topROI,
     topChurn,
+    topLTV,
+    topConversion,
   } = useMemo(() => {
     const lbls = items.map((x) => x.source_label || "Unknown");
     const cost = items.map((x) => centsToDollars(x.cost_cents));
@@ -199,15 +266,32 @@ export default function Dashboard(): JSX.Element {
     const l = items.map((x) => x.leads);
     const c = items.map((x) => x.customers);
     const o = items.map((x) => x.orders);
+    const aov = items.map((x) => centsToDollars(x.avg_order_value_cents));
+    const conversion = items.map((x) => x.conversion_rate_pct);
+    const lifetime = items.map((x) => x.avg_customer_lifetime_days);
+    const ltv = items.map((x) => x.customer_ltv);
 
+    // KPI calculations from totals
     const TR = centsToDollars(toNumber(totals?.revenue_cents));
     const TO = toNumber(totals?.orders);
+    const TC = toNumber(totals?.unique_customers);
+    const TL = toNumber(totals?.avg_customer_lifetime_days);
+    const TLTV = toNumber(totals?.customer_ltv);
+    const TCR = toNumber(totals?.conversion_rate_pct);
+    const TRR = toNumber(totals?.customer_retention_pct);
+    const TSR = centsToDollars(toNumber(totals?.subscription_revenue_cents));
 
+    // Find best/worst performers
     let bestROI = { label: "N/A", value: 0 };
     let worstChurn = { label: "N/A", value: 0 };
+    let bestLTV = { label: "N/A", value: 0 };
+    let bestConversion = { label: "N/A", value: 0 };
+    
     lbls.forEach((s, i) => {
       if (roi[i] > bestROI.value) bestROI = { label: s, value: roi[i] };
       if (churn[i] > worstChurn.value) worstChurn = { label: s, value: churn[i] };
+      if (ltv[i] > bestLTV.value) bestLTV = { label: s, value: ltv[i] };
+      if (conversion[i] > bestConversion.value) bestConversion = { label: s, value: conversion[i] };
     });
 
     return {
@@ -219,10 +303,22 @@ export default function Dashboard(): JSX.Element {
       leads: l,
       customers: c,
       orders: o,
+      avgOrderValues: aov,
+      conversionRates: conversion,
+      customerLifetimeDays: lifetime,
+      customerLTVs: ltv,
       kpiTotalRevenue: TR,
       kpiTotalOrders: TO,
+      kpiTotalCustomers: TC,
+      kpiAvgLTV: TLTV,
+      kpiAvgCustomerLifetime: TL,
+      kpiConversionRate: TCR,
+      kpiRetentionRate: TRR,
+      kpiSubscriptionRevenue: TSR,
       topROI: bestROI,
       topChurn: worstChurn,
+      topLTV: bestLTV,
+      topConversion: bestConversion,
     };
   }, [items, totals]);
 
@@ -239,6 +335,10 @@ export default function Dashboard(): JSX.Element {
     const pctTooltip = (ctx: TooltipItem<"bar">): string => {
       const val = Number(ctx.parsed.y ?? 0);
       return `${ctx.dataset.label as string}: ${fmtPct(val)}`;
+    };
+    const daysTooltip = (ctx: TooltipItem<"bar">): string => {
+      const val = Number(ctx.parsed.y ?? 0);
+      return `${ctx.dataset.label as string}: ${fmtDays(val)}`;
     };
 
     // Cost vs Revenue (stacked)
@@ -314,11 +414,67 @@ export default function Dashboard(): JSX.Element {
       chartsRef.current.push(new Chart(funnelRef.current, cfg));
     }
 
+    // Average Order Value ($)
+    if (aovRef.current) {
+      const cfg: ChartConfiguration<"bar", number[], string> = {
+        type: "bar",
+        data: { labels, datasets: [{ label: "AOV ($)", data: avgOrderValues, backgroundColor: "#10b981" }] },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false }, title: { display: false }, tooltip: { callbacks: { label: moneyTooltip } } },
+          scales: { y: { beginAtZero: true } },
+        },
+      };
+      chartsRef.current.push(new Chart(aovRef.current, cfg));
+    }
+
+    // Conversion Rate (%)
+    if (conversionRef.current) {
+      const cfg: ChartConfiguration<"bar", number[], string> = {
+        type: "bar",
+        data: { labels, datasets: [{ label: "Conversion (%)", data: conversionRates, backgroundColor: "#8b5cf6" }] },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false }, title: { display: false }, tooltip: { callbacks: { label: pctTooltip } } },
+          scales: { y: { beginAtZero: true, max: 100 } },
+        },
+      };
+      chartsRef.current.push(new Chart(conversionRef.current, cfg));
+    }
+
+    // Customer Lifetime Value ($)
+    if (ltvRef.current) {
+      const cfg: ChartConfiguration<"bar", number[], string> = {
+        type: "bar",
+        data: { labels, datasets: [{ label: "LTV ($)", data: customerLTVs, backgroundColor: "#f59e0b" }] },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false }, title: { display: false }, tooltip: { callbacks: { label: moneyTooltip } } },
+          scales: { y: { beginAtZero: true } },
+        },
+      };
+      chartsRef.current.push(new Chart(ltvRef.current, cfg));
+    }
+
+    // Customer Lifetime (Days)
+    if (lifetimeRef.current) {
+      const cfg: ChartConfiguration<"bar", number[], string> = {
+        type: "bar",
+        data: { labels, datasets: [{ label: "Lifetime", data: customerLifetimeDays, backgroundColor: "#ec4899" }] },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false }, title: { display: false }, tooltip: { callbacks: { label: daysTooltip } } },
+          scales: { y: { beginAtZero: true } },
+        },
+      };
+      chartsRef.current.push(new Chart(lifetimeRef.current, cfg));
+    }
+
     return () => {
       chartsRef.current.forEach((c) => c.destroy());
       chartsRef.current = [];
     };
-  }, [labels, costDollars, revenueDollars, roiPct, churnPct, leads, customers, orders]);
+  }, [labels, costDollars, revenueDollars, roiPct, churnPct, leads, customers, orders, avgOrderValues, conversionRates, customerLTVs, customerLifetimeDays]);
 
   // quick ranges
   function setRangeDays(n: number): void {
@@ -407,13 +563,42 @@ export default function Dashboard(): JSX.Element {
         </div>
       </section>
 
-      {/* KPI Cards */}
+      {/* Executive KPI Dashboard */}
       <section>
+        <h3 className="text-xl font-semibold text-white mb-4">Executive Overview</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4 mb-6">
+          <SummaryCard title="Total Revenue" value={loading ? "…" : fmtMoney(kpiTotalRevenue)} color="bg-emerald-600" />
+          <SummaryCard title="Total Orders" value={loading ? "…" : fmtNumber(kpiTotalOrders)} color="bg-blue-600" />
+          <SummaryCard title="Unique Customers" value={loading ? "…" : fmtNumber(kpiTotalCustomers)} color="bg-purple-600" />
+          <SummaryCard title="Avg Customer LTV" value={loading ? "…" : fmtMoney(kpiAvgLTV)} color="bg-orange-600" />
+          <SummaryCard title="Conversion Rate" value={loading ? "…" : fmtPct(kpiConversionRate)} color="bg-pink-600" />
+          <SummaryCard title="Retention Rate" value={loading ? "…" : fmtPct(kpiRetentionRate)} color="bg-green-600" />
+        </div>
+        
+        <h4 className="text-lg font-semibold text-white mb-3">Performance Leaders</h4>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 border-2 border-dashed border-gray-600 p-4 rounded-xl">
-          <SummaryCard title="Total Orders" value={loading ? "…" : String(kpiTotalOrders)} />
-          <SummaryCard title="Total Revenue" value={loading ? "…" : fmtMoney(kpiTotalRevenue)} />
-          <SummaryCard title="Top ROI Source" value={loading ? "…" : `${topROI.label} · ${fmtPct(topROI.value)}`} />
-          <SummaryCard title="Highest Churn" value={loading ? "…" : `${topChurn.label} · ${fmtPct(topChurn.value)}`} />
+          <SummaryCard title="Highest ROI" value={loading ? "…" : `${topROI.label} · ${fmtPct(topROI.value)}`} color="bg-green-700" />
+          <SummaryCard title="Best LTV" value={loading ? "…" : `${topLTV.label} · ${fmtMoney(topLTV.value)}`} color="bg-yellow-600" />
+          <SummaryCard title="Top Conversion" value={loading ? "…" : `${topConversion.label} · ${fmtPct(topConversion.value)}`} color="bg-indigo-600" />
+          <SummaryCard title="Highest Churn" value={loading ? "…" : `${topChurn.label} · ${fmtPct(topChurn.value)}`} color="bg-red-600" />
+        </div>
+
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="bg-gray-800/60 border border-gray-700 rounded-xl p-4">
+            <h5 className="text-sm font-semibold text-gray-300 mb-2">Subscription Business</h5>
+            <div className="text-2xl font-bold text-blue-400">{loading ? "…" : fmtMoney(kpiSubscriptionRevenue)}</div>
+            <div className="text-xs text-gray-400">Recurring Revenue</div>
+          </div>
+          <div className="bg-gray-800/60 border border-gray-700 rounded-xl p-4">
+            <h5 className="text-sm font-semibold text-gray-300 mb-2">Customer Health</h5>
+            <div className="text-2xl font-bold text-purple-400">{loading ? "…" : fmtDays(kpiAvgCustomerLifetime)}</div>
+            <div className="text-xs text-gray-400">Avg Customer Lifetime</div>
+          </div>
+          <div className="bg-gray-800/60 border border-gray-700 rounded-xl p-4">
+            <h5 className="text-sm font-semibold text-gray-300 mb-2">Opportunities</h5>
+            <div className="text-2xl font-bold text-red-400">{loading ? "…" : fmtPct(100 - kpiRetentionRate)}</div>
+            <div className="text-xs text-gray-400">Potential Churn Risk</div>
+          </div>
         </div>
       </section>
 
@@ -435,6 +620,26 @@ export default function Dashboard(): JSX.Element {
           <canvas ref={funnelRef} className="w-full h-64" />
         </ChartBlock>
 
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+          <ChartBlock title="Average Order Value by Source">
+            <canvas ref={aovRef} className="w-full h-64" />
+          </ChartBlock>
+          
+          <ChartBlock title="Conversion Rate by Source">
+            <canvas ref={conversionRef} className="w-full h-64" />
+          </ChartBlock>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+          <ChartBlock title="Customer Lifetime Value by Source">
+            <canvas ref={ltvRef} className="w-full h-64" />
+          </ChartBlock>
+          
+          <ChartBlock title="Average Customer Lifetime by Source">
+            <canvas ref={lifetimeRef} className="w-full h-64" />
+          </ChartBlock>
+        </div>
+
         {loading && <div className="mb-6 text-center text-sm text-gray-400">Loading…</div>}
         {!loading && items.length === 0 && (
           <div className="mb-6 text-center text-sm text-gray-400">No data in the selected range.</div>
@@ -450,30 +655,34 @@ export default function Dashboard(): JSX.Element {
               <tr>
                 <th className="px-2 py-2 text-left">Source</th>
                 <th className="px-2 py-2 text-right">Leads</th>
-                <th className="px-2 py-2 text-right">Customers</th>
                 <th className="px-2 py-2 text-right">Orders</th>
-                <th className="px-2 py-2 text-right">Cost</th>
+                <th className="px-2 py-2 text-right">Conv %</th>
                 <th className="px-2 py-2 text-right">Revenue</th>
-                <th className="px-2 py-2 text-right">ROI</th>
-                <th className="px-2 py-2 text-right">Churn</th>
+                <th className="px-2 py-2 text-right">AOV</th>
+                <th className="px-2 py-2 text-right">ROI %</th>
+                <th className="px-2 py-2 text-right">LTV</th>
+                <th className="px-2 py-2 text-right">Lifetime</th>
+                <th className="px-2 py-2 text-right">Churn %</th>
               </tr>
             </thead>
             <tbody>
               {items.map((r) => (
                 <tr key={r.source_label} className="border-t border-gray-700/60">
                   <td className="px-2 py-2">{r.source_label || "Unknown"}</td>
-                  <td className="px-2 py-2 text-right">{r.leads}</td>
-                  <td className="px-2 py-2 text-right">{r.customers}</td>
-                  <td className="px-2 py-2 text-right">{r.orders}</td>
-                  <td className="px-2 py-2 text-right">{fmtMoney(centsToDollars(r.cost_cents))}</td>
+                  <td className="px-2 py-2 text-right">{fmtNumber(r.leads)}</td>
+                  <td className="px-2 py-2 text-right">{fmtNumber(r.orders)}</td>
+                  <td className="px-2 py-2 text-right">{fmtPct(r.conversion_rate_pct)}</td>
                   <td className="px-2 py-2 text-right">{fmtMoney(centsToDollars(r.revenue_cents))}</td>
+                  <td className="px-2 py-2 text-right">{fmtMoney(centsToDollars(r.avg_order_value_cents))}</td>
                   <td className="px-2 py-2 text-right">{fmtPct(r.roi_pct)}</td>
+                  <td className="px-2 py-2 text-right">{fmtMoney(r.customer_ltv)}</td>
+                  <td className="px-2 py-2 text-right">{fmtDays(r.avg_customer_lifetime_days)}</td>
                   <td className="px-2 py-2 text-right">{fmtPct(r.churn_pct)}</td>
                 </tr>
               ))}
               {items.length === 0 && (
                 <tr>
-                  <td className="px-3 py-4 text-center text-gray-400" colSpan={8}>
+                  <td className="px-3 py-4 text-center text-gray-400" colSpan={10}>
                     No data
                   </td>
                 </tr>
@@ -482,7 +691,8 @@ export default function Dashboard(): JSX.Element {
           </table>
         </div>
         <p className="text-xs text-gray-500 mt-2">
-          ROI = (Revenue − Cost) / Cost. Churn = churn_customers / total_customers. Money values summed over the date range.
+          Conv % = Orders/Leads conversion rate. AOV = Average Order Value. ROI = (Revenue − Cost) / Cost. 
+          LTV = Customer Lifetime Value. Lifetime = Average customer lifespan. Churn % = Customer churn rate.
         </p>
       </section>
     </div>
@@ -491,13 +701,16 @@ export default function Dashboard(): JSX.Element {
 
 /* ----------------------------- UI bits ----------------------------- */
 
-function SummaryCard(props: { title: string; value: string }): JSX.Element {
+function SummaryCard(props: { title: string; value: string; color?: string }): JSX.Element {
+  const bgColor = props.color || "bg-gray-800";
+  const textColor = props.color ? "text-white" : "text-blue-400";
+  
   return (
-    <div className="p-4 rounded-xl bg-gray-800 bg-opacity-50 backdrop-blur-md border border-gray-700 shadow-lg relative overflow-hidden">
-      <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-blue-200/50 via-transparent to-pink-500/10 rounded-xl pointer-events-none" />
+    <div className={`p-4 rounded-xl ${bgColor} bg-opacity-90 backdrop-blur-md border border-gray-700 shadow-lg relative overflow-hidden`}>
+      <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-white/10 via-transparent to-white/5 rounded-xl pointer-events-none" />
       <div className="relative">
-        <div className="text-white text-lg font-semibold">{props.title}</div>
-        <div className="text-2xl text-blue-400 font-bold">{props.value}</div>
+        <div className="text-white text-sm font-semibold opacity-90">{props.title}</div>
+        <div className={`text-2xl ${textColor} font-bold`}>{props.value}</div>
       </div>
     </div>
   );

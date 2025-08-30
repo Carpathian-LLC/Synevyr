@@ -64,7 +64,11 @@ def generate_meta_leads(engine, total_leads=100):
                 "is_organic": False,
                 "platform": "meta",
                 "retailer_item_id": generate_random_string(12),
-                "lead_status": random.choice(["new", "qualified", "converted", "rejected"]),
+                "lead_status": random.choices(
+                    population=["new", "qualified", "converted", "rejected", "nurturing"],
+                    weights=[0.35, 0.25, 0.15, 0.15, 0.10],  # Realistic lead funnel
+                    k=1
+                )[0],
                 "created_at": fake.date_between(start_date='-30d', end_date='today')
             })
 
@@ -85,12 +89,16 @@ def generate_meta_leads(engine, total_leads=100):
                 "form_name": fake.word().capitalize() + " Form",
                 "is_organic": random.choice([True, False]),
                 "platform": random.choices(
-                    population=["google", "linkedin", "tiktok", "referral", "organic"],
-                    weights=[0.25, 0.2, 0.2, 0.2, 0.15],
+                    population=["google", "linkedin", "tiktok", "referral", "organic", "billboard"],
+                    weights=[0.30, 0.15, 0.10, 0.20, 0.20, 0.05],  # More realistic weights
                     k=1
                 )[0],
                 "retailer_item_id": generate_random_string(12),
-                "lead_status": random.choice(["new", "qualified", "converted", "rejected"]),
+                "lead_status": random.choices(
+                    population=["new", "qualified", "converted", "rejected", "nurturing"],
+                    weights=[0.35, 0.25, 0.15, 0.15, 0.10],  # Realistic lead funnel
+                    k=1
+                )[0],
                 "created_at": fake.date_between(start_date='-30d', end_date='today')
             })
 

@@ -122,29 +122,18 @@
     
   </style>
   <script>
-    function checkCarpathianStatus() {
-      const statusElement = document.getElementById("carpathian-status");
-      const cacheBuster = Date.now();
-      const script = document.createElement("script");
-      script.src = `https://synevyr.org?cb=${cacheBuster}`;
-      script.async = true;
-      script.onload = function() {
-         statusElement.innerHTML = "Online";
-         statusElement.classList.add("online");
-         statusElement.classList.remove("offline");
-         document.head.removeChild(script);
-      };
-      script.onerror = function() {
-         statusElement.innerHTML = "Offline";
-         statusElement.classList.add("offline");
-         statusElement.classList.remove("online");
-         document.head.removeChild(script);
-      };
-      document.head.appendChild(script);
-    }
-    window.onload = checkCarpathianStatus;
-    setInterval(checkCarpathianStatus, 15000); // Check every 15 seconds
+function checkStatus() {
+  const img = new Image();
+  const url = "https://carpathian.ai/favicon.ico?cb=" + Date.now();
+  let done = false;
 
+  const finish = (ok) => { if (done) return; done = true; setStatus(ok); };
+  const t = setTimeout(() => finish(false), 5000);
+
+  img.onload = () => { clearTimeout(t); finish(true); };
+  img.onerror = () => { clearTimeout(t); finish(false); };
+  img.src = url;
+}
 
   async function loadBackendVersion() {
     try {
@@ -159,7 +148,7 @@
   }
 
   window.onload = () => {
-    checkCarpathianStatus();
+    checkStatus();
     loadBackendVersion();
   };
 

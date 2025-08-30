@@ -38,10 +38,11 @@ def generate_wc_orders(cursor, total_orders=10000):
     email_leads    = [lead for lead in all_leads if lead[2] == "email"]
     other_leads    = [lead for lead in all_leads if lead[2] not in {"meta", "organic", "email"}]
 
-    # Step 2: Sampling strategy
-    meta_orders    = random.sample(meta_leads, k=min(len(meta_leads), max(1, int(total_orders * 0.05))))
-    organic_orders = random.sample(organic_leads, k=min(len(organic_leads), int(total_orders * 0.5)))
-    email_orders   = random.sample(email_leads, k=min(len(email_leads), int(total_orders * 0.25)))
+    # Step 2: More realistic sampling strategy aligned with acquisition volumes
+    # Order distribution should roughly follow lead quality, not extreme ratios
+    meta_orders    = random.sample(meta_leads, k=min(len(meta_leads), max(1, int(total_orders * 0.12))))
+    organic_orders = random.sample(organic_leads, k=min(len(organic_leads), int(total_orders * 0.40)))
+    email_orders   = random.sample(email_leads, k=min(len(email_leads), int(total_orders * 0.20)))
 
     remaining = total_orders - (len(meta_orders) + len(organic_orders) + len(email_orders))
     other_orders = random.sample(other_leads, k=min(len(other_leads), remaining))
@@ -61,14 +62,28 @@ def generate_wc_orders(cursor, total_orders=10000):
         now = datetime.now()
         past = now - timedelta(days=random.randint(1, 30))
 
+        # Realistic order value ranges with more nuanced distribution
         if referrer == "meta":
-            order_total = round(random.uniform(20.00, 80.00), 2)
+            # Meta ads: Lower AOV but volume-focused
+            order_total = round(random.triangular(15.00, 120.00, 45.00), 2)
         elif referrer == "email":
-            order_total = round(random.uniform(60.00, 200.00), 2)
+            # Email: Good quality, mid-range AOV
+            order_total = round(random.triangular(35.00, 250.00, 85.00), 2)
         elif referrer == "organic":
-            order_total = round(random.uniform(150.00, 500.00), 2)
+            # Organic: Highest quality, highest AOV
+            order_total = round(random.triangular(60.00, 800.00, 180.00), 2)
+        elif referrer == "referral":
+            # Referrals: High quality, premium AOV
+            order_total = round(random.triangular(80.00, 600.00, 220.00), 2)
+        elif referrer == "google":
+            # Google Ads: Solid mid-range performance
+            order_total = round(random.triangular(25.00, 350.00, 95.00), 2)
+        elif referrer == "billboard":
+            # Traditional: Brand awareness, varied AOV
+            order_total = round(random.triangular(40.00, 400.00, 120.00), 2)
         else:
-            order_total = round(random.uniform(40.00, 300.00), 2)
+            # Other sources: Mixed bag
+            order_total = round(random.triangular(20.00, 300.00, 75.00), 2)
 
         discount = round(order_total * random.uniform(0, 0.2), 2)
         shipping = round(random.uniform(0, 20.00), 2)
@@ -76,7 +91,11 @@ def generate_wc_orders(cursor, total_orders=10000):
         orders.append((
             fake.unique.random_int(min=10**9, max=10**10-1),  # id
             0,  # parent_id
-            random.choice(["completed", "processing", "on-hold", "cancelled"]),
+            random.choices(
+                population=["completed", "processing", "on-hold", "cancelled", "pending", "refunded"],
+                weights=[0.70, 0.15, 0.08, 0.04, 0.02, 0.01],  # Realistic order status distribution
+                k=1
+            )[0],
             "USD",
             "1.0",
             random.choice([True, False]),

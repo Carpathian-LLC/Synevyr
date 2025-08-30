@@ -49,6 +49,8 @@ if __name__ == "__main__":
     # Apply the selected config to the app (was missing before)
     app.config.from_object(config_class)
 
+    host = app.config.get("HOST", "127.0.0.1")
+    port = app.config.get("PORT", 2001)
     # Logs + one-time DB init per environment
     if env == "production":
         print("========================================")
@@ -59,12 +61,10 @@ if __name__ == "__main__":
     else:
         print("========================================")
         print("Server Environment:", os.getenv("FLASK_ENV", "NOT SET"))
-        print("Server running on: http://localhost:2001")
+        print(f"Server running on: http://localhost:{port}")
         print("========================================")
         initialize_db.initialize_database("dev")
 
-    host = app.config.get("HOST", "127.0.0.1")
-    port = app.config.get("PORT", 2001)
 
     # Do not force debug; derive from env or config
     debug_flag = (env == "development") if "DEBUG" not in app.config else bool(app.config["DEBUG"])

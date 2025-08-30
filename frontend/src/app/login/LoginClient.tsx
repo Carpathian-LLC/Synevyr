@@ -6,9 +6,7 @@ import axios, { AxiosError } from "axios";
 import Link from "next/link";
 import { useRouter } from "next/navigation"; 
 import { useAuth } from "@/auth/AuthContext"; 
-import TwoFactorLoginModal from "@/components/TwoFactorLoginModal";
 import "@/styles/globals.css";
-import NotificationDisplay from "@/components/SystemNotificationDisplay";
 import PasswordInput from "@/components/forms/PasswordInput";
 
 
@@ -36,9 +34,6 @@ export default function LoginClient() {
     password: false,
   });
 
-
-  // 2FA modal trigger
-  const [twoFARequired, setTwoFARequired] = useState(false);
 
   const auth = useAuth(); // Get auth context methods
   const router = useRouter(); // Get Next.js router
@@ -143,12 +138,11 @@ export default function LoginClient() {
         // access_token is not used client-side due to HttpOnly cookies
       };
 
-      if (data.success && !data.two_fa_required) {
+      if (data.success) {
         await auth.checkAuthStatus(); // Update AuthContext
         router.push("/dashboard");    // Navigate using Next.js router
-      } else if (data.success && data.two_fa_required) {
-        setTwoFARequired(true);
-      } else {
+      } else if (data.success) {
+      }  {
         // This case might be hit if backend returns success: false with a message
         setErrors({ general: data.message || "Login failed. Please try again." });
       }
@@ -169,17 +163,6 @@ export default function LoginClient() {
     }
   };
 
-  const handle2FASuccess = async () => {
-    setTwoFARequired(false); // Close the modal
-    await auth.checkAuthStatus(); // Update AuthContext
-    router.push("/dashboard");    // Navigate
-  };
-
-  const handle2FACancel = () => {
-    setTwoFARequired(false);
-    // Optionally, inform the backend if a pre-2FA session needs cleanup, though usually not required.
-  };
-
   // Determine if the submit button should be disabled
   // Disabled if loading, or if there are any active errors after fields have been touched.
   const isSubmitDisabled = loading || Object.values(errors).some(error => !!error);
@@ -191,7 +174,6 @@ export default function LoginClient() {
       <section className="py-16 bg-gradient-to-br from-white to-gray-200 dark:from-gray-800 dark:to-black">
         <div className="max-w-lg mx-auto bg-white dark:bg-gray-800 rounded-xl shadow-xl p-10">
             {/* Notification inside the login box */}
-            <NotificationDisplay location="login" />
           
           <h2 className="text-3xl font-bold text-center text-gray-900 dark:text-white mb-8">
             Log In
@@ -273,13 +255,6 @@ export default function LoginClient() {
           </p>
         </div>
       </section>
-
-      {/* Two-Factor Authentication Modal */}
-      <TwoFactorLoginModal
-        show={twoFARequired}
-        onSuccess={handle2FASuccess}
-        onCancel={handle2FACancel}
-      />
     </>
   );
 }

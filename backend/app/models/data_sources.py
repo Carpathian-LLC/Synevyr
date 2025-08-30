@@ -3,8 +3,18 @@
 # ------------------------------------------------------------------------------------
 # Legal Notice: Distribution Not Authorized.
 # ------------------------------------------------------------------------------------
-# Notes:
-# - 
+# 🔌 PLATFORM MODELS - Data Source Management
+# ------------------------------------------------------------------------------------
+# These models manage how Synevyr's platform users configure and ingest their data.
+# This includes data source definitions, raw data storage, and processing pipelines.
+#
+# Platform Models in this file:
+# - DataSource: Platform users' data source configurations (API connections, etc.)
+# - UserDatasetRaw: Raw data ingested from platform users' data sources
+# - SourceMetricsDaily: Processed daily metrics from the raw data
+# - AnalyticsEtlState: ETL job state tracking for data processing
+#
+# These are platform infrastructure models, not the actual customer data being analyzed.
 # ------------------------------------------------------------------------------------
 # Imports:
 from datetime import datetime
@@ -73,7 +83,9 @@ class UserDatasetRaw(db.Model):
     __table_args__ = (
         db.Index("idx_user_source_time", "user_id", "source_id", "record_time", "id"),
         db.Index("idx_ingested_at", "ingested_at", "id"),
-        db.UniqueConstraint("user_id", "source_id", "content_hash", name="uq_user_source_hash"),
+        # Note: Removed content_hash from unique constraint due to MySQL BLOB key length limitation
+        # The hash is still available for duplicate detection but not enforced at DB level
+        db.UniqueConstraint("user_id", "source_id", "record_time", name="uq_user_source_time"),
     )
 
     def __repr__(self):
@@ -103,7 +115,28 @@ class SourceMetricsDaily(db.Model):
     total_customers = db.Column(db.Integer, nullable=False, default=0)
 
     # optional extras for debugging or deeper charts
-    exits_total = db.Column(db.Integer, nullable=False, default=0)  # across leads+customers+orders if you want parity with previous “exit” idea
+    exits_total = db.Column(db.Integer, nullable=False, default=0)  # across leads+customers+orders if you want parity with previous "exit" idea
+
+    # Enhanced customer analytics
+    new_customers = db.Column(db.Integer, nullable=False, default=0)
+    repeat_customers = db.Column(db.Integer, nullable=False, default=0)
+    unique_customers = db.Column(db.Integer, nullable=False, default=0)
+    active_customers = db.Column(db.Integer, nullable=False, default=0)
+    reactivated_customers = db.Column(db.Integer, nullable=False, default=0)
+    at_risk_customers = db.Column(db.Integer, nullable=False, default=0)
+    
+    # Revenue analytics
+    subscription_revenue_cents = db.Column(db.BigInteger, nullable=False, default=0)
+    average_order_value_cents = db.Column(db.BigInteger, nullable=False, default=0)
+    high_value_orders = db.Column(db.Integer, nullable=False, default=0)
+    
+    # Customer lifetime analytics  
+    avg_customer_lifetime_days = db.Column(db.Integer, nullable=False, default=0)
+    customer_lifetime_days = db.Column(db.BigInteger, nullable=False, default=0)
+    
+    # Performance metrics
+    conversion_rate_pct = db.Column(db.Float, nullable=False, default=0.0)
+    customer_retention_pct = db.Column(db.Float, nullable=False, default=0.0)
 
     # audit
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)

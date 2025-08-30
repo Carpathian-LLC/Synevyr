@@ -251,146 +251,26 @@ def create_database_and_tables():
         sys.exit(1)
 
     try:
-        # Step 3: Create tables
-        print("[DEBUG] Creating tables if they do not exist...")
-        with db_engine.begin() as conn:
-            conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS user_customers (
-                id BIGINT PRIMARY KEY AUTO_INCREMENT,
-                first_name VARCHAR(255),
-                last_name VARCHAR(255),
-                email VARCHAR(255) UNIQUE,
-                phone VARCHAR(50),
-                address VARCHAR(255),
-                city VARCHAR(255),
-                state VARCHAR(255),
-                country VARCHAR(255),
-                zipcode VARCHAR(255),
-                activity_status VARCHAR(255), 
-                created_at DATE,
-                referrer VARCHAR(255)
-            );
-            """))
-
-            conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS meta_leads (
-                id BIGINT PRIMARY KEY,
-                first_name VARCHAR(255),
-                last_name VARCHAR(255),
-                email VARCHAR(255) UNIQUE,
-                ad_id BIGINT,
-                ad_name VARCHAR(255),
-                adset_id BIGINT,
-                adset_name VARCHAR(255),
-                campaign_id BIGINT,
-                campaign_name VARCHAR(255),
-                form_id BIGINT,
-                form_name VARCHAR(255),
-                is_organic BOOLEAN,
-                platform VARCHAR(50),
-                retailer_item_id VARCHAR(255),
-                lead_status VARCHAR(50),
-                created_at DATE
-            );
-            """))
-
-            conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS wc_orders (
-                id BIGINT PRIMARY KEY,
-                parent_id BIGINT,
-                status VARCHAR(50),
-                currency VARCHAR(10),
-                version VARCHAR(10),
-                prices_include_tax BOOLEAN,
-                date_created DATETIME,
-                date_modified DATETIME,
-                discount_total DECIMAL(10, 2),
-                discount_tax DECIMAL(10, 2),
-                shipping_total DECIMAL(10, 2),
-                shipping_tax DECIMAL(10, 2),
-                cart_tax DECIMAL(10, 2),
-                total DECIMAL(10, 2),
-                total_tax DECIMAL(10, 2),
-                customer_id BIGINT,
-                order_key VARCHAR(50),
-                billing TEXT,
-                shipping TEXT,
-                payment_method VARCHAR(100),
-                payment_method_title VARCHAR(100),
-                transaction_id VARCHAR(100),
-                customer_ip_address VARCHAR(45),
-                customer_user_agent TEXT,
-                created_via VARCHAR(50),
-                customer_note TEXT,
-                date_completed DATETIME,
-                date_paid DATETIME,
-                cart_hash VARCHAR(100),
-                number VARCHAR(20),
-                meta_data TEXT,
-                line_items TEXT,
-                tax_lines TEXT,
-                shipping_lines TEXT,
-                fee_lines TEXT,
-                coupon_lines TEXT,
-                refunds TEXT,
-                payment_url TEXT,
-                is_editable BOOLEAN,
-                needs_payment BOOLEAN,
-                needs_processing BOOLEAN,
-                date_created_gmt DATETIME,
-                date_modified_gmt DATETIME,
-                date_completed_gmt DATETIME,
-                date_paid_gmt DATETIME,
-                store_credit_used DECIMAL(10, 2),
-                currency_symbol VARCHAR(5)
-            );
-            """))
-
-            conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS customer_analysis (
-                master_id BIGINT PRIMARY KEY AUTO_INCREMENT,
-                wc_cx_id BIGINT UNIQUE, 
-                ck_cx_id BIGINT UNIQUE,
-                source VARCHAR(255),  
-                ad_name VARCHAR(255),  
-                first_name VARCHAR(255),
-                last_name VARCHAR(255), 
-                email VARCHAR(255) UNIQUE,
-                created_at DATE,
-                unsubscribed_on DATE,
-                cx_tenure VARCHAR(30),
-                activity_status VARCHAR(255),
-                order_total DECIMAL(10, 2),
-                subscription_total DECIMAL(10, 2),
-                order_status VARCHAR(255),
-                subscription_status VARCHAR(255),
-                total_spend DECIMAL(10, 2),
-                created_at_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """))
-
-            conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS cx_stats (
-                id BIGINT PRIMARY KEY AUTO_INCREMENT,
-                customer_id BIGINT,
-                email VARCHAR(255) UNIQUE,
-                first_name VARCHAR(255),
-                last_name VARCHAR(255),
-                origin VARCHAR(255),
-                activity_status VARCHAR(255),
-                created_at DATE,
-                unsubscribed_on DATE,
-                cx_tenure VARCHAR(30),
-                subscribed_days INT,
-                lifetime_value DECIMAL(10, 2),
-                purchased_items TEXT,
-                city VARCHAR(255),
-                state VARCHAR(255),
-                country VARCHAR(255),
-                phone VARCHAR(50)
-            );
-            """))
-        print("✅ Tables created or already exist.")
+        # Step 3: Create tables using centralized SQLAlchemy models
+        print("[DEBUG] Creating tables using centralized SQLAlchemy models...")
+        
+        # Ensure environment variables are properly loaded before importing backend modules
+        os.environ.update({
+            'DEV_DB_HOST': host,
+            'DEV_DB_USER': user, 
+            'DEV_DB_PASSWORD': password,
+            'DEV_DB_PORT': port,
+            'DATABASE': db_name
+        })
+        
+        # Import centralized table creation utility
+        sys.path.insert(0, str(ROOT / "backend"))
+        from backend.app.utils.create_tables import create_all_tables
+        
+        # Use centralized table creation with the target database engine
+        create_all_tables(db_engine)
+        print("✅ All tables created using SQLAlchemy models.")
+        
     except OperationalError as e:
         print("❌ Database connection failed.")
         print("Likely causes:")
@@ -399,6 +279,13 @@ def create_database_and_tables():
         print("  • Host/port is wrong")
         print("-"*80)
         #print(f"Error: {e.orig}")  # Underlying PyMySQL message
+        sys.exit(1)
+    except Exception as e:
+        print("❌ Table creation failed.")
+        print(f"Error: {e}")
+        print(f"Error type: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 def main():

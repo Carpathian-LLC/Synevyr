@@ -28,6 +28,22 @@ from dotenv import load_dotenv
 # Ensure the project root is in the Python path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
+sys.path.append(str(ROOT / "backend"))
+
+# Flask app setup for SQLAlchemy models
+import os
+os.environ['FLASK_ENV'] = 'development'  # Prevent production checks
+
+# Import Flask app to get models
+try:
+    from backend.app import create_app
+    from backend.app.extensions import db
+    from backend.app.utils.create_tables import create_all_tables
+    from backend.app.models.user import Customer
+    from backend.app.models.analysis import MetaLead, WooCommerceOrder, CustomerAnalysis, CustomerStats
+except Exception as e:
+    print(f"Warning: Could not import some backend modules (likely due to metadata conflicts): {e}")
+    print("This is normal if tables were already created. Continuing with seeding...")
 
 # Local generators
 from generators.make_me_a_person import generate_person_info
@@ -54,7 +70,18 @@ engine = create_engine(db_uri)
 # === Seed Functions ===
 def seed_user_customers():
     print("⏳ Inserting into user_customers...")
-    activity_pool = ['active'] * 80 + ['inactive'] * 10 + ['pending'] * 10
+    # Realistic customer activity distribution
+    activity_weights = [
+        ("active", 0.65),        # Most customers should be active
+        ("inactive", 0.20),      # Some natural churn
+        ("pending", 0.08),       # New signups being processed
+        ("churned", 0.05),       # Definitely churned customers
+        ("at-risk", 0.02),       # Customers showing decline signs
+    ]
+    
+    activity_pool = []
+    for status, weight in activity_weights:
+        activity_pool.extend([status] * int(weight * 1000))
 
     batch_size = 1000
     total = 50000
@@ -121,152 +148,168 @@ def seed_wc_orders():
 def seed_customer_analysis():
     print("⏳ Seeding customer_analysis and cx_stats...")
 
-    raw_conn = engine.raw_connection()
-    try:
-        cursor = raw_conn.cursor()
-        try:
-            # Ensure both tables exist
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS customer_analysis (
-                    master_id BIGINT PRIMARY KEY AUTO_INCREMENT,
-                    wc_cx_id BIGINT UNIQUE, 
-                    ck_cx_id BIGINT UNIQUE,
-                    source VARCHAR(255),  
-                    ad_name VARCHAR(255),  
-                    first_name VARCHAR(255),
-                    last_name VARCHAR(255), 
-                    email VARCHAR(255) UNIQUE,
-                    created_at DATE,
-                    unsubscribed_on DATE,
-                    cx_tenure VARCHAR(30),
-                    activity_status VARCHAR(255),
-                    order_total DECIMAL(10, 2),
-                    subscription_total DECIMAL(10, 2),
-                    order_status VARCHAR(255),
-                    subscription_status VARCHAR(255),
-                    total_spend DECIMAL(10, 2),
-                    created_at_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-            cursor.execute("TRUNCATE TABLE customer_analysis")
+    # Use SQLAlchemy models instead of raw SQL
+    with engine.begin() as conn:
+        # Truncate tables (models are already created)
+        conn.execute(text("TRUNCATE TABLE customer_analysis"))
+        conn.execute(text("TRUNCATE TABLE cx_stats"))
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS cx_stats (
-                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
-                    customer_id BIGINT,
-                    email VARCHAR(255) UNIQUE,
-                    first_name VARCHAR(255),
-                    last_name VARCHAR(255),
-                    origin VARCHAR(255),
-                    activity_status VARCHAR(255),
-                    created_at DATE,
-                    unsubscribed_on DATE,
-                    cx_tenure VARCHAR(30),
-                    subscribed_days INT,
-                    lifetime_value DECIMAL(10, 2),
-                    purchased_items TEXT,
-                    city VARCHAR(255),
-                    state VARCHAR(255),
-                    country VARCHAR(255),
-                    phone VARCHAR(50)
-                );
-            """)
-            cursor.execute("TRUNCATE TABLE cx_stats")
+        # Query customer data using SQLAlchemy text queries
+        rows = conn.execute(text("""
+            SELECT
+                uc.id, uc.first_name, uc.last_name, uc.email, uc.city, uc.state, uc.country, uc.phone,
+                uc.activity_status, uc.created_at,
+                ml.id AS meta_id, ml.platform AS source, ml.ad_name,
+                SUM(wo.total) AS total_amount,
+                MAX(wo.status) AS order_status
+            FROM user_customers uc
+            LEFT JOIN meta_leads ml ON ml.email = uc.email
+            LEFT JOIN wc_orders wo ON wo.customer_id = uc.id
+            GROUP BY uc.id
+        """)).fetchall()
 
-            cursor.execute("""
-                SELECT
-                    uc.id, uc.first_name, uc.last_name, uc.email, uc.city, uc.state, uc.country, uc.phone,
-                    uc.activity_status, uc.created_at,
-                    ml.id AS meta_id, ml.platform AS source, ml.ad_name,
-                    SUM(wo.total) AS total_amount,
-                    MAX(wo.status) AS order_status
-                FROM user_customers uc
-                LEFT JOIN meta_leads ml ON ml.email = uc.email
-                LEFT JOIN wc_orders wo ON wo.customer_id = uc.id
-                GROUP BY uc.id
-            """)
-            rows = cursor.fetchall()
+        insert_analysis = text("""
+            INSERT INTO customer_analysis (
+                wc_cx_id, ck_cx_id, source, ad_name, first_name, last_name, email,
+                created_at, unsubscribed_on, cx_tenure, activity_status,
+                order_total, subscription_total, order_status,
+                subscription_status, total_spend
+            ) VALUES (:wc_cx_id, :ck_cx_id, :source, :ad_name, :first_name, :last_name, :email,
+                     :created_at, :unsubscribed_on, :cx_tenure, :activity_status,
+                     :order_total, :subscription_total, :order_status,
+                     :subscription_status, :total_spend)
+        """)
 
-            insert_analysis = """
-                INSERT INTO customer_analysis (
-                    wc_cx_id, ck_cx_id, source, ad_name, first_name, last_name, email,
-                    created_at, unsubscribed_on, cx_tenure, activity_status,
-                    order_total, subscription_total, order_status,
-                    subscription_status, total_spend
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """
+        insert_stats = text("""
+            INSERT INTO cx_stats (
+                customer_id, email, first_name, last_name, origin, activity_status,
+                created_at, unsubscribed_on, cx_tenure, subscribed_days,
+                lifetime_value, purchased_items, city, state, country, phone
+            ) VALUES (:customer_id, :email, :first_name, :last_name, :origin, :activity_status,
+                     :created_at, :unsubscribed_on, :cx_tenure, :subscribed_days,
+                     :lifetime_value, :purchased_items, :city, :state, :country, :phone)
+        """)
 
-            insert_stats = """
-                INSERT INTO cx_stats (
-                    customer_id, email, first_name, last_name, origin, activity_status,
-                    created_at, unsubscribed_on, cx_tenure, subscribed_days,
-                    lifetime_value, purchased_items, city, state, country, phone
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, '', %s, %s, %s, %s)
-            """
+        for row in rows:
+            (
+                uc_id, first_name, last_name, email, city, state, country, phone,
+                activity_status, created_at,
+                meta_id, source, ad_name,
+                total_amount, order_status
+            ) = row
+            
+            tenure_days = 0
+            order_total = float(total_amount or 0)
+            total_spend = order_total
+            subscribed_days = tenure_days
 
-            for row in rows:
-                (
-                    uc_id, first_name, last_name, email, city, state, country, phone,
-                    activity_status, created_at,
-                    meta_id, source, ad_name,
-                    total_amount, order_status
-                ) = row
-                
-                tenure_days = 0
-                order_total = float(total_amount or 0)
-                total_spend = order_total
-                subscribed_days = tenure_days
+            # Enhanced source-based behavioral modeling with realistic customer patterns
+            if source:
+                s = source.lower()
+                if s == "organic":
+                    # Organic: Highest quality, longest tenure, highest LTV
+                    tenure_days += random.triangular(60, 365, 180)
+                    total_spend *= random.triangular(1.4, 2.2, 1.8)
+                elif s == "referral":
+                    # Referrals: High quality, good tenure, premium LTV
+                    tenure_days += random.triangular(45, 300, 120) 
+                    total_spend *= random.triangular(1.2, 2.0, 1.6)
+                elif s == "email":
+                    # Email: Good quality, solid tenure and spend
+                    tenure_days += random.triangular(20, 180, 90)
+                    total_spend *= random.triangular(1.1, 1.6, 1.3)
+                elif s == "google":
+                    # Google: Decent quality, moderate tenure
+                    tenure_days += random.triangular(10, 120, 45)
+                    total_spend *= random.triangular(0.9, 1.4, 1.1)
+                elif s == "meta":
+                    # Meta: Lower quality, shorter tenure, lower LTV
+                    tenure_days += random.triangular(-20, 60, 10)
+                    total_spend *= random.triangular(0.5, 1.1, 0.8)
+                elif s == "billboard":
+                    # Traditional: Mixed quality, varies widely
+                    tenure_days += random.triangular(-10, 150, 60)
+                    total_spend *= random.triangular(0.8, 1.5, 1.0)
+                else:
+                    # Other: Neutral baseline
+                    tenure_days += random.triangular(-5, 90, 30)
+                    total_spend *= random.triangular(0.8, 1.3, 1.0)
 
-                # Inject source-based behavioral bias based on customer data (churchanswers.com)
-                if source:
-                    s = source.lower()
-                    if s in {"organic", "referral"}:
-                        tenure_days += random.randint(30, 90)
-                        total_spend *= random.uniform(1.3, 1.7)
-                    elif s == "meta":
-                        tenure_days -= random.randint(10, 40)
-                        total_spend *= random.uniform(0.6, 0.9)
-                    elif s in {"google", "linkedin", "tiktok"}:
-                        tenure_days += random.randint(5, 20)
-                        total_spend *= random.uniform(0.9, 1.2)
+            # Clamp minimum tenure to 0
+            tenure_days = max(0, tenure_days)
+            subscribed_days = tenure_days
 
-                # Clamp minimum tenure to 0
-                tenure_days = max(0, tenure_days)
-                subscribed_days = tenure_days
+            unsubscribed_on = None
+            if activity_status and activity_status.lower() in {"inactive", "churned", "unsubscribed"}:
+                if created_at and tenure_days > 30:
+                    unsubscribed_on = created_at + timedelta(days=random.randint(30, int(tenure_days)))
+            elif created_at and tenure_days > 45 and random.random() < 0.15:  # 15% random churn
+                unsubscribed_on = created_at + timedelta(days=random.randint(45, int(tenure_days)))
 
-                unsubscribed_on = None
-                if activity_status and activity_status.lower() in {"inactive", "churned", "unsubscribed"}:
-                    if created_at and tenure_days > 30:
-                        unsubscribed_on = created_at + timedelta(days=random.randint(30, tenure_days))
-                elif created_at and tenure_days > 45 and random.random() < 0.15:  # 15% random churn
-                    unsubscribed_on = created_at + timedelta(days=random.randint(45, tenure_days))
+            # Execute parameterized insert statements
+            conn.execute(insert_analysis, {
+                'wc_cx_id': uc_id,
+                'ck_cx_id': meta_id,
+                'source': source or 'organic',
+                'ad_name': ad_name or '',
+                'first_name': first_name,
+                'last_name': last_name,
+                'email': email,
+                'created_at': created_at,
+                'unsubscribed_on': unsubscribed_on,
+                'cx_tenure': f"{int(tenure_days)} days",
+                'activity_status': activity_status,
+                'order_total': order_total,
+                'subscription_total': 0,
+                'order_status': order_status or '',
+                'subscription_status': 'N/A',
+                'total_spend': total_spend
+            })
 
-                cursor.execute(insert_analysis, (
-                    uc_id, meta_id, source or 'organic', ad_name or '',
-                    first_name, last_name, email, created_at,
-                    unsubscribed_on, f"{tenure_days} days", activity_status,
-                    order_total, 0, order_status or '', 'N/A', total_spend
-                ))
-
-                cursor.execute(insert_stats, (
-                    uc_id, email, first_name, last_name, source or 'organic',
-                    activity_status, created_at, unsubscribed_on,
-                    f"{tenure_days} days", subscribed_days,
-                    total_spend, city or '', state or '', country or '', phone or ''
-                ))
-
-            raw_conn.commit()
-        finally:
-            cursor.close()
-    finally:
-        raw_conn.close()
+            conn.execute(insert_stats, {
+                'customer_id': uc_id,
+                'email': email,
+                'first_name': first_name,
+                'last_name': last_name,
+                'origin': source or 'organic',
+                'activity_status': activity_status,
+                'created_at': created_at,
+                'unsubscribed_on': unsubscribed_on,
+                'cx_tenure': f"{int(tenure_days)} days",
+                'subscribed_days': int(subscribed_days),
+                'lifetime_value': total_spend,
+                'purchased_items': '',
+                'city': city or '',
+                'state': state or '',
+                'country': country or '',
+                'phone': phone or ''
+            })
 
     print("✅ customer_analysis and cx_stats seeded.")
 
 
+# === Helper Functions ===
+def create_tables():
+    """Create all tables using centralized SQLAlchemy models"""
+    print("⏳ Creating database tables...")
+    try:
+        create_all_tables(engine)
+        print("✅ All tables created.")
+    except NameError:
+        print("⚠️ Could not use centralized table creation (models not imported). Tables should already exist.")
+    except Exception as e:
+        print(f"⚠️ Table creation issue: {e}. Tables may already exist.")
+
 # === Entrypoint ===
 def main():
     print("Starting synthetic data generation...")
+    
+    # Skip table creation if centralized models aren't available (tables should already exist)
+    try:
+        create_tables()
+    except NameError:
+        print("⏩ Skipping table creation - using existing tables from centralized system")
+    
     seed_user_customers()
     seed_meta_leads()
     seed_wc_orders()

@@ -37,9 +37,24 @@ from app.utils.logging import logger
 from flask import Flask, request, session as flask_session
 
 # ------------------------------------------------------------------------------------
-# Load the Env
-env_path = Path(__file__).resolve().parents[2] / "keys.env"
-load_dotenv(env_path)
+# Load the Env - try multiple possible locations
+env_paths = [
+    Path(__file__).resolve().parents[2] / "keys.env",  # Normal path: backend/app/../../keys.env
+    Path.cwd() / "keys.env",  # Current working directory
+    Path(__file__).resolve().parent / "keys.env",  # Same directory as this file
+]
+
+env_path = None
+for path in env_paths:
+    if path.exists():
+        env_path = path
+        break
+
+if env_path:
+    load_dotenv(env_path)
+    print(f"✓ Loaded keys.env from: {env_path}")
+else:
+    print(f"✗ keys.env not found at any of: {[str(p) for p in env_paths]}")
 os.environ["FLASK_ENV"] = os.getenv("FLASK_ENV", "production")
 env = os.environ["FLASK_ENV"]
 

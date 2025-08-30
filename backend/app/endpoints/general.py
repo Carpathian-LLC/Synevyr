@@ -162,7 +162,7 @@ def user_feedback():
 
 @general_bp.route('/login', methods=['POST'])
 @csrf.exempt
-@limiter.limit("3 per minute")
+# @limiter.limit("3 per minute")
 def login():
     MAX_ATTEMPTS = current_app.config["MAX_ATTEMPTS"]
     SUSPENSION_TIME = current_app.config["SUSPENSION_TIME"]

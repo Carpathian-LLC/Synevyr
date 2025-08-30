@@ -228,6 +228,15 @@ def analytics_by_source():
           SUM(smd.churn_customers) AS churn_customers,
           SUM(smd.total_customers) AS total_customers,
           SUM(smd.exits_total) AS exits_total,
+          SUM(smd.new_customers) AS new_customers,
+          SUM(smd.repeat_customers) AS repeat_customers,
+          SUM(smd.unique_customers) AS unique_customers,
+          SUM(smd.active_customers) AS active_customers,
+          SUM(smd.reactivated_customers) AS reactivated_customers,
+          SUM(smd.at_risk_customers) AS at_risk_customers,
+          SUM(smd.subscription_revenue_cents) AS subscription_revenue_cents,
+          SUM(smd.high_value_orders) AS high_value_orders,
+          SUM(smd.customer_lifetime_days) AS total_customer_lifetime_days,
           CASE
             WHEN SUM(smd.cost_cents) = 0 THEN 0.0
             ELSE ((SUM(smd.revenue_cents) - SUM(smd.cost_cents)) / SUM(smd.cost_cents)) * 100.0
@@ -235,7 +244,27 @@ def analytics_by_source():
           CASE
             WHEN SUM(smd.total_customers) = 0 THEN 0.0
             ELSE (SUM(smd.churn_customers) / SUM(smd.total_customers)) * 100.0
-          END AS churn_pct
+          END AS churn_pct,
+          CASE
+            WHEN SUM(smd.orders) = 0 THEN 0
+            ELSE SUM(smd.revenue_cents) / SUM(smd.orders)
+          END AS avg_order_value_cents,
+          CASE
+            WHEN SUM(smd.leads) = 0 THEN 0.0
+            ELSE (SUM(smd.orders) / SUM(smd.leads)) * 100.0
+          END AS conversion_rate_pct,
+          CASE
+            WHEN SUM(smd.unique_customers) = 0 THEN 0
+            ELSE SUM(smd.customer_lifetime_days) / SUM(smd.unique_customers)
+          END AS avg_customer_lifetime_days,
+          CASE
+            WHEN SUM(smd.total_customers) = 0 THEN 0.0
+            ELSE ((SUM(smd.total_customers) - SUM(smd.churn_customers)) / SUM(smd.total_customers)) * 100.0
+          END AS customer_retention_pct,
+          CASE
+            WHEN SUM(smd.unique_customers) = 0 THEN 0.0
+            ELSE (SUM(smd.revenue_cents) / 100.0) / SUM(smd.unique_customers)
+          END AS customer_ltv
         FROM source_metrics_daily smd
         WHERE smd.user_id = :uid
           AND smd.day BETWEEN :since AND :until
@@ -257,8 +286,22 @@ def analytics_by_source():
             "churn_customers": _as_int(r["churn_customers"]),
             "total_customers": _as_int(r["total_customers"]),
             "exits_total": _as_int(r["exits_total"]),
+            "new_customers": _as_int(r["new_customers"]),
+            "repeat_customers": _as_int(r["repeat_customers"]),
+            "unique_customers": _as_int(r["unique_customers"]),
+            "active_customers": _as_int(r["active_customers"]),
+            "reactivated_customers": _as_int(r["reactivated_customers"]),
+            "at_risk_customers": _as_int(r["at_risk_customers"]),
+            "subscription_revenue_cents": _as_int(r["subscription_revenue_cents"]),
+            "high_value_orders": _as_int(r["high_value_orders"]),
+            "total_customer_lifetime_days": _as_int(r["total_customer_lifetime_days"]),
+            "avg_customer_lifetime_days": _as_int(r["avg_customer_lifetime_days"]),
             "roi_pct": _as_float(r["roi_pct"]),
             "churn_pct": _as_float(r["churn_pct"]),
+            "avg_order_value_cents": _as_int(r["avg_order_value_cents"]),
+            "conversion_rate_pct": _as_float(r["conversion_rate_pct"]),
+            "customer_retention_pct": _as_float(r["customer_retention_pct"]),
+            "customer_ltv": _as_float(r["customer_ltv"]),
         })
 
     # totals (then compute pct with Decimal -> float)
@@ -271,7 +314,28 @@ def analytics_by_source():
           SUM(cost_cents) AS cost_cents,
           SUM(churn_customers) AS churn_customers,
           SUM(total_customers) AS total_customers,
-          SUM(exits_total) AS exits_total
+          SUM(exits_total) AS exits_total,
+          SUM(new_customers) AS new_customers,
+          SUM(repeat_customers) AS repeat_customers,
+          SUM(unique_customers) AS unique_customers,
+          SUM(active_customers) AS active_customers,
+          SUM(reactivated_customers) AS reactivated_customers,
+          SUM(at_risk_customers) AS at_risk_customers,
+          SUM(subscription_revenue_cents) AS subscription_revenue_cents,
+          SUM(high_value_orders) AS high_value_orders,
+          SUM(customer_lifetime_days) AS total_customer_lifetime_days,
+          CASE
+            WHEN SUM(orders) = 0 THEN 0
+            ELSE SUM(revenue_cents) / SUM(orders)
+          END AS avg_order_value_cents,
+          CASE
+            WHEN SUM(unique_customers) = 0 THEN 0
+            ELSE SUM(customer_lifetime_days) / SUM(unique_customers)
+          END AS avg_customer_lifetime_days,
+          CASE
+            WHEN SUM(unique_customers) = 0 THEN 0.0
+            ELSE (SUM(revenue_cents) / 100.0) / SUM(unique_customers)
+          END AS customer_ltv
         FROM source_metrics_daily
         WHERE user_id = :uid AND day BETWEEN :since AND :until
     """)
@@ -286,16 +350,40 @@ def analytics_by_source():
         "churn_customers": _as_int(t.get("churn_customers")),
         "total_customers": _as_int(t.get("total_customers")),
         "exits_total": _as_int(t.get("exits_total")),
+        "new_customers": _as_int(t.get("new_customers")),
+        "repeat_customers": _as_int(t.get("repeat_customers")),
+        "unique_customers": _as_int(t.get("unique_customers")),
+        "active_customers": _as_int(t.get("active_customers")),
+        "reactivated_customers": _as_int(t.get("reactivated_customers")),
+        "at_risk_customers": _as_int(t.get("at_risk_customers")),
+        "subscription_revenue_cents": _as_int(t.get("subscription_revenue_cents")),
+        "high_value_orders": _as_int(t.get("high_value_orders")),
+        "total_customer_lifetime_days": _as_int(t.get("total_customer_lifetime_days")),
+        "avg_order_value_cents": _as_int(t.get("avg_order_value_cents")),
+        "avg_customer_lifetime_days": _as_int(t.get("avg_customer_lifetime_days")),
+        "customer_ltv": _as_float(t.get("customer_ltv")),
     }
 
     rc = _D(totals["revenue_cents"])
     cc = _D(totals["cost_cents"])
     ch = _D(totals["churn_customers"])
     tc = _D(totals["total_customers"])
+    ld = _D(totals["leads"])
+    od = _D(totals["orders"])
     hundred = Decimal("100")
 
     totals["roi_pct"] = float(Decimal(0) if cc == 0 else ((rc - cc) * hundred) / cc)
     totals["churn_pct"] = float(Decimal(0) if tc == 0 else (ch * hundred) / tc)
+    totals["conversion_rate_pct"] = float(Decimal(0) if ld == 0 else (od * hundred) / ld)
+    totals["customer_retention_pct"] = float(hundred - _D(totals["churn_pct"]))
+    
+    # High-value order percentage
+    total_orders = _D(totals["orders"])
+    high_val_orders = _D(totals["high_value_orders"])
+    totals["high_value_order_pct"] = float(Decimal(0) if total_orders == 0 else (high_val_orders * hundred) / total_orders)
+    
+    # Subscription revenue percentage
+    totals["subscription_revenue_pct"] = float(Decimal(0) if rc == 0 else (_D(totals["subscription_revenue_cents"]) * hundred) / rc)
 
     return jsonify({
         "range": {"since": d0.isoformat(), "until": d1.isoformat()},
