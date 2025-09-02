@@ -79,21 +79,22 @@ def init_celery(flask_app: Flask):
     celery.Task = ContextTask
 
     # 5) Register all task modules BEFORE beat starts dispatching
-    import app.tasks.refresh_data_sources  # noqa: F401
-    import app.tasks.clean_user_data       # noqa: F401
+    import app.tasks.extract_data_sources   # noqa: F401
+    import app.tasks.transform_data          # noqa: F401 
+    import app.tasks.load_analytics          # noqa: F401
 
     # 6) Define Beat schedule AFTER conf.update so it isn't clobbered elsewhere
     celery.conf.beat_schedule = {
-        "update-data-sources": {
-            "task": "app.tasks.refresh_data_sources.update_data_sources_task",
+        "extract-data-sources": {
+            "task": "app.tasks.extract_data_sources.extract_data_sources_task",
             "schedule": UPDATE_INTERVAL,
             # "options": {"queue": "ingest"},  # uncomment if you route to a dedicated queue
         },
-        "build-source-metrics-daily": { 
-        "task": "app.tasks.clean_user_data.build_source_metrics_daily_task",
-        "schedule": CLEAN_INTERVAL,
-        # "options": {"queue": "etl"},
-    },
+        "transform-clean-data": { 
+            "task": "app.tasks.transform_data.transform_data_task",
+            "schedule": CLEAN_INTERVAL,
+            # "options": {"queue": "etl"},
+        },
     }
 
     return celery

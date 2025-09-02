@@ -104,12 +104,14 @@ def create_app():
     from app.endpoints.auth import auth_bp
     from app.endpoints.general import general_bp
     from app.endpoints.open_data import public_bp
+    from app.endpoints.public_data import public_data_bp
     from app.endpoints.data_sources import data_sources_bp
     from app.endpoints.tasks import tasks_bp
     
     app.register_blueprint(auth_bp)
     app.register_blueprint(general_bp)
     app.register_blueprint(public_bp)
+    app.register_blueprint(public_data_bp)
     app.register_blueprint(data_sources_bp)
     app.register_blueprint(tasks_bp)
 

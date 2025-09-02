@@ -6,7 +6,7 @@
 # Description:
 # -> Populates `wc_orders` with simulated ecommerce transactions by source type <-
 #
-# Orders are sampled from leads in `user_customers`, weighted by referrer type. 
+# Orders are sampled from customers in `crm_customers`, weighted by source type. 
 # Higher-value orders are assigned to organic/email, with lowest to Meta as seen an a real
 # customer dataset.
 #
@@ -26,59 +26,53 @@ fake = Faker()
 # ------------------------------------------------------------------------------------
 # Functions
 def generate_wc_orders(cursor, total_orders=10000):
-    # Step 1: Pull leads from user_customers table
-    cursor.execute("SELECT id, email, referrer FROM user_customers")
-    all_leads = cursor.fetchall()
+    # Step 1: Pull customers from crm_customers table (use source_id instead of referrer)
+    cursor.execute("SELECT id, email, source_id FROM crm_customers")
+    all_customers = cursor.fetchall()
 
-    if not all_leads:
-        raise Exception("No leads found in user_customers table.")
+    if not all_customers:
+        raise Exception("No customers found in crm_customers table.")
 
-    meta_leads     = [lead for lead in all_leads if lead[2] == "meta"]
-    organic_leads  = [lead for lead in all_leads if lead[2] == "organic"]
-    email_leads    = [lead for lead in all_leads if lead[2] == "email"]
-    other_leads    = [lead for lead in all_leads if lead[2] not in {"meta", "organic", "email"}]
+    meta_customers    = [customer for customer in all_customers if customer[2] == "meta"]
+    organic_customers = [customer for customer in all_customers if customer[2] == "organic"]
+    email_customers   = [customer for customer in all_customers if customer[2] == "email"]
+    other_customers   = [customer for customer in all_customers if customer[2] not in {"meta", "organic", "email"}]
 
     # Step 2: More realistic sampling strategy aligned with acquisition volumes
-    # Order distribution should roughly follow lead quality, not extreme ratios
-    meta_orders    = random.sample(meta_leads, k=min(len(meta_leads), max(1, int(total_orders * 0.12))))
-    organic_orders = random.sample(organic_leads, k=min(len(organic_leads), int(total_orders * 0.40)))
-    email_orders   = random.sample(email_leads, k=min(len(email_leads), int(total_orders * 0.20)))
+    # Order distribution should roughly follow customer quality, not extreme ratios
+    meta_orders    = random.sample(meta_customers, k=min(len(meta_customers), max(1, int(total_orders * 0.12))))
+    organic_orders = random.sample(organic_customers, k=min(len(organic_customers), int(total_orders * 0.40)))
+    email_orders   = random.sample(email_customers, k=min(len(email_customers), int(total_orders * 0.20)))
 
     remaining = total_orders - (len(meta_orders) + len(organic_orders) + len(email_orders))
-    other_orders = random.sample(other_leads, k=min(len(other_leads), remaining))
+    other_orders = random.sample(other_customers, k=min(len(other_customers), remaining))
 
-    selected_leads = meta_orders + organic_orders + email_orders + other_orders
-    random.shuffle(selected_leads)
+    selected_customers = meta_orders + organic_orders + email_orders + other_orders
+    random.shuffle(selected_customers)
 
-    # Step 3: Get list of customer IDs
-    cursor.execute("SELECT id FROM user_customers")
-    user_ids = [row[0] for row in cursor.fetchall()]
-    if not user_ids:
-        raise Exception("No users found in users table.")
-
-    # Step 4: Build order rows
+    # Step 3: Build order rows (customer_id, email, source_id are from selected_customers)
     orders = []
-    for i, (lead_id, email, referrer) in enumerate(selected_leads):
+    for i, (customer_id, email, source_id) in enumerate(selected_customers):
         now = datetime.now()
         past = now - timedelta(days=random.randint(1, 30))
 
         # Realistic order value ranges with more nuanced distribution
-        if referrer == "meta":
+        if source_id == "meta":
             # Meta ads: Lower AOV but volume-focused
             order_total = round(random.triangular(15.00, 120.00, 45.00), 2)
-        elif referrer == "email":
+        elif source_id == "email":
             # Email: Good quality, mid-range AOV
             order_total = round(random.triangular(35.00, 250.00, 85.00), 2)
-        elif referrer == "organic":
+        elif source_id == "organic":
             # Organic: Highest quality, highest AOV
             order_total = round(random.triangular(60.00, 800.00, 180.00), 2)
-        elif referrer == "referral":
+        elif source_id == "referral":
             # Referrals: High quality, premium AOV
             order_total = round(random.triangular(80.00, 600.00, 220.00), 2)
-        elif referrer == "google":
+        elif source_id == "google":
             # Google Ads: Solid mid-range performance
             order_total = round(random.triangular(25.00, 350.00, 95.00), 2)
-        elif referrer == "billboard":
+        elif source_id == "billboard":
             # Traditional: Brand awareness, varied AOV
             order_total = round(random.triangular(40.00, 400.00, 120.00), 2)
         else:
@@ -108,7 +102,7 @@ def generate_wc_orders(cursor, total_orders=10000):
             0.00,           # cart_tax
             order_total,
             0.00,           # total_tax
-            random.choice(user_ids),
+            customer_id,  # Use the actual customer_id from selected_customers
             fake.uuid4()[:32],
             fake.text(max_nb_chars=200),
             fake.text(max_nb_chars=200),
@@ -117,7 +111,7 @@ def generate_wc_orders(cursor, total_orders=10000):
             fake.uuid4(),
             fake.ipv4_public(),
             fake.user_agent(),
-            referrer,
+            source_id,  # Use source_id instead of referrer
             fake.sentence(),
             now,
             now,

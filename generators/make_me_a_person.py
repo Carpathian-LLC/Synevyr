@@ -184,7 +184,7 @@ def generate_person_info():
         "zipcode": zipcode,
         "phone": phone_number,
         "email": email,
-        "referrer": referrer
+        "source_id": referrer  # Use source_id for consistency
 
     }
 

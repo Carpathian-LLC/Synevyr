@@ -114,6 +114,7 @@ bad_url_logger = get_named_logger("bad_url", "bad_url_logger.log") # MOVE TO SQL
 http_logger = get_named_logger("network_logger", "network_logger.log")
 unauthorized_logger = get_named_logger("unauthorized_logger", "unauthorized_logger.log")
 celery_logger = get_named_logger("celery_logger", "celery_logger.log")
+debug_logger = get_named_logger("debug_logger", "debug_logger.log")
 
 def log_activity(status_code, ip_address="0.0.0.0", user_id=None, guest_id=None, event_message=None, response_time=None, app_version=None):
     from app.models.logging import ActivityLog, FailedLoginAttempt

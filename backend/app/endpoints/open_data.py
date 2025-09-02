@@ -36,7 +36,7 @@ def _host_base() -> str:
 def _usage_payload(endpoint: str, *, table: str | None, allowed_tables: set[str] | None) -> dict:
     """
     Build a standard usage payload for empty datasets.
-    endpoint: literal path like "/public/user_customers" or "/public/analytics"
+    endpoint: literal path like "/public/customers" or "/public/analytics"
     table: the specific table being queried, or None if not applicable
     allowed_tables: when relevant, list of accepted table names for the endpoint
     """
@@ -112,13 +112,13 @@ def fetch_public_table_data(table: str, allowed_tables: set[str], endpoint_path:
 # ------------------------------------------------------------------------------------
 # Public Endpoints
 
-@public_bp.route("/public/user_customers", methods=["GET"])
-def public_user_customers():
-    return fetch_public_table_data("user_customers", {"user_customers"}, endpoint_path="/public/user_customers")
+@public_bp.route("/public/customers", methods=["GET"])
+def public_customers():
+    return fetch_public_table_data("crm_customers", {"crm_customers"}, endpoint_path="/public/customers")
 
-@public_bp.route("/public/meta_leads", methods=["GET"])
-def public_meta_leads():
-    return fetch_public_table_data("meta_leads", {"meta_leads"}, endpoint_path="/public/meta_leads")
+@public_bp.route("/public/leads", methods=["GET"])
+def public_leads():
+    return fetch_public_table_data("leads", {"leads"}, endpoint_path="/public/leads")
 
 @public_bp.route("/public/wc_orders", methods=["GET"])
 def public_wc_orders():

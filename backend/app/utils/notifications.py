@@ -18,7 +18,6 @@ from app.extensions import db, mail
 from app.extensions import socketio
 
 from app.models.user import Customer, Referral
-from app.models.general import BadgeDefinition, EarnedBadge
 from app.utils.logging import logger
 from app.utils.helpers import get_geoip_data
 from app.utils.CONSTS import BASE_DIR
@@ -558,54 +557,6 @@ def send_referral_invitation_email(subject, recipient_email, referrer, ip_addres
     db.session.commit()
 
     logger.info(f"Referral email sent to {recipient_email} from {referrer.username}")
-
-# Site Badge Modal
-def emit_badge_earned(user, badge_def):
-    payload = {
-        "badge_name": badge_def.name,
-        "description": badge_def.description,
-        "icon_url": badge_def.icon_url,
-    }
-
-    room = f"user_{user.id}"
-    logger.info(f"[SOCKETIO] Emitting badge_earned to room '{room}' (namespace='/badges') with: {payload}")
-
-    try:
-        socketio.emit(
-            "badge_earned",
-            payload,
-            room=room,
-            namespace="/badges"
-        )
-    except Exception as e:
-        logger.exception(f"[SOCKETIO] Failed to emit badge_earned for user {user.id}: {e}")
-
-def award_badge_by_name(user, badge_name, silent: bool = False):
-    badge_def = BadgeDefinition.query.filter_by(name=badge_name).first()
-    if not badge_def:
-        raise ValueError(f"No such badge: {badge_name}")
-
-    already_earned = EarnedBadge.query.filter_by(user_id=user.id, badge_id=badge_def.id).first()
-    if already_earned:
-        logger.info(f"User {user.id} already earned badge '{badge_name}'")
-        return
-
-    earned = EarnedBadge(user_id=user.id, badge_id=badge_def.id)
-    db.session.add(earned)
-    db.session.commit()
-
-    if not silent:
-        emit_badge_earned(user, badge_def)
-
-def emit_badge_earned_toast_only_DEBUG(user, badge_name):
-    logger.info(f"[DEBUG] Attempting toast for user_id={user.id}, badge_name='{badge_name}'")
-
-    badge_def = BadgeDefinition.query.filter_by(name=badge_name).first()
-    if not badge_def:
-        logger.warning(f"[DEBUG] No BadgeDefinition for '{badge_name}'")
-        return
-
-    emit_badge_earned(user, badge_def)
 
 # Charges Notifications
 def notify_user_payment_success(user, message):

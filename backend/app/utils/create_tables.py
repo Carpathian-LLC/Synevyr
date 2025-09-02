@@ -11,12 +11,12 @@ from sqlalchemy import create_engine
 from app.extensions import db
 
 # Import all models to ensure they're registered
-from app.models.user import User, Customer, UserCustomer
+from app.models.user import User, Customer
 from app.models.plan import Plan
-from app.models.analysis import MetaLead, WooCommerceOrder, CustomerAnalysis, CustomerStats
-from app.models.data_sources import DataSource, UserDatasetRaw, SourceMetricsDaily, AnalyticsEtlState
+from app.models.analysis import CustomerAnalysis, CustomerStats, SourceMetricsDaily
+from app.models.data_sources import DataSource, UserDatasetRaw, AnalyticsEtlState
 from app.models.logging import ActivityLog, UserActivityLog, SiteSecurityLog, FailedLoginAttempt
-
+from app.models.public_data import Leads, WooCommerceOrder, UserCustomer
 def create_all_tables(engine=None):
     """
     Creates all tables defined in SQLAlchemy models.

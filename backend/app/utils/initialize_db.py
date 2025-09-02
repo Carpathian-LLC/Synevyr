@@ -149,7 +149,7 @@ def get_sqlalchemy_database_uri(db_environment):
 
     return (
         "mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
-        "?ssl_verify_cert=false"
+        "?ssl_disabled=true&charset=utf8mb4"
     ).format(**db_config)
 
 def ensure_connection(connection):

@@ -81,17 +81,33 @@ npm test
 - Chart.js for data visualization
 
 ### Database Schema
-Main tables include:
-- `user_customers` - Customer information and activity status
-- `wc_orders` - WooCommerce order data with billing/shipping details  
-- `meta_leads` - Meta/Facebook advertising lead data
-- `customer_analysis` - Unified customer analysis with spend metrics
-- `cx_stats` - Customer statistics and lifetime value calculations
+
+**User Platform Data Pipeline (Production Architecture):**
+- `data_sources` - User's configured API endpoints and connection details
+- `user_dataset_raw` - Raw JSON data ingested from user's connected API sources
+- `leads_clean`, `customers_clean`, `orders_clean` - Clean staging tables from ETL transform
+- `source_metrics_daily` - Processed analytics and metrics for dashboard display
+- `analytics_etl_state` - ETL cursor tracking for incremental processing
+
+**IMPORTANT: The platform NEVER accesses demo tables directly. All data must flow through APIs → user_dataset_raw → ETL pipeline.**
+
+**Demo/Development Tables (COMPLETELY ISOLATED from platform):**
+- `crm_customers` - Sample CRM customer data with proper customer_id relationships  
+- `wc_orders` - Sample WooCommerce orders linked to customers via customer_id FK
+- `leads` - Sample advertising lead data (isolated, no customer linking required)
+- `customer_analysis` - Legacy unified customer analysis
+- `cx_stats` - Legacy customer statistics
+
+**Demo Data Usage:**
+- These tables exist ONLY for testing platform functionality via API simulation
+- Demo data has proper cardinality: crm_customers.id ← wc_orders.customer_id (1:many)
+- Platform accesses demo data ONLY through API endpoints (e.g., `/api/customers`, `/api/orders`)
+- The platform ETL processes API responses, not direct table access
 
 ### Data Generators (`generators/`)
 Synthetic data generation for development:
 - `generator.py` - Main seeding orchestrator
-- `make_me_a_person.py` - Customer data generation
+- `make_me_a_person.py` - CRM customer data generation
 - `make_me_wc_orders.py` - Order data generation  
 - `make_me_meta_leads.py` - Lead data generation
 - `location_repo.py` - Geographic data repository
@@ -118,6 +134,20 @@ Synthetic data generation for development:
 3. Both backend (port 2001) and frontend (port 2000) run concurrently
 4. Celery workers handle background data processing tasks
 5. Database seeding creates realistic synthetic data for development
+
+## Data Processing Pipeline
+
+**User Analytics Platform (Production Flow):**
+1. **Connect Data Sources**: Users configure API endpoints in `/dashboard/connect-data`
+2. **Ingest Data**: `refresh_data_sources.py` fetches data → `user_dataset_raw` table  
+3. **Process Data**: `clean_user_data.py` processes raw data → `source_metrics_daily` table
+4. **Display Metrics**: Dashboard shows analytics from `source_metrics_daily` filtered by user_id
+
+**Key Endpoints:**
+- `POST /tasks/run/update-data-sources` - Fetch data from connected API sources
+- `POST /tasks/run/build-source-metrics` - Process raw data into dashboard metrics  
+- `POST /tasks/run/ingest-and-clean` - Complete workflow (ingest then process)
+- `GET /analytics/source-metrics` - Dashboard metrics API
 
 ## Prerequisites
 

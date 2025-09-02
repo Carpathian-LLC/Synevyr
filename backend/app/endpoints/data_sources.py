@@ -7,6 +7,7 @@
 # - Open data sources (no auth, no CSRF)
 # ------------------------------------------------------------------------------------
 # Imports:
+from __future__ import annotations
 from datetime import datetime, timedelta, date
 from flask import Blueprint, jsonify, request
 from sqlalchemy import text
@@ -15,8 +16,11 @@ from decimal import Decimal
 # Local Imports
 from app.extensions import db, csrf
 from app.models.data_sources import DataSource
+from app.models.analysis import SourceMetricsDaily
+from app.models.clean_staging import CustomersClean
 from app.utils.security import authorizeUser
 
+from app.utils.logging import debug_logger
 # ------------------------------------------------------------------------------------
 # Vars
 data_sources_bp = Blueprint("data_sources", __name__)
@@ -52,6 +56,10 @@ def _D(x) -> Decimal:
         return Decimal(str(x or 0))
     except Exception:
         return Decimal(0)
+
+def _to_ymd(s: str) -> str:
+    return datetime.fromisoformat(s).date().isoformat()
+
 # ------------------------------------------------------------------------------------
 # Endpoints
 
@@ -192,202 +200,219 @@ def delete_source(source_id: int):
     db.session.commit()
     return jsonify({"ok": True}), 200
 
+# NEW PRIMARY data sources endpoint! Source metrics depreciating
 @data_sources_bp.route("/analytics/source-metrics", methods=["GET"])
-def analytics_by_source():
+def source_metrics():
     """
-    Returns aggregated metrics by source_label for the current user over a date range.
-    Query params:
-      since=YYYY-MM-DD (optional; default: today-90d)
-      until=YYYY-MM-DD (optional; default: today)
+    Returns SourceMetricsResponse:
+      {
+        range: { since, until },
+        generated_at,
+        items: [
+          {
+            source_label, leads, customers, orders, revenue_cents, cost_cents,
+            churn_customers, total_customers, exits_total,
+            new_customers, repeat_customers, unique_customers,
+            active_customers, reactivated_customers, at_risk_customers,
+            subscription_revenue_cents, high_value_orders,
+            total_customer_lifetime_days, avg_customer_lifetime_days,
+            roi_pct, churn_pct, avg_order_value_cents, conversion_rate_pct,
+            customer_retention_pct, customer_ltv
+          }, ...
+        ],
+        totals: { ... same numeric fields, plus *_pct summaries ... }
+      }
     """
     uid = authorizeUser()
+    since = request.args.get("since")
+    until = request.args.get("until")
+    if not since or not until:
+        return jsonify({"error": "since and until are required YYYY-MM-DD"}), 400
+    since = _to_ymd(since)
+    until = _to_ymd(until)
 
-    # dates
-    since_s = request.args.get("since")
-    until_s = request.args.get("until")
-    if not since_s or not until_s:
-        d0, d1 = _default_range()
-    else:
-        d0, err0 = _parse_date("since", since_s)
-        d1, err1 = _parse_date("until", until_s)
-        if err0 or err1:
-            return jsonify({"error": err0 or err1}), 400
+    debug_logger.info(f"[analytics] uid={uid} range={since}..{until}")
 
-    if d0 > d1:
-        return jsonify({"error": "since must be <= until"}), 400
+    # ---------- Additive facts from the materialized daily rollup ----------
+    from sqlalchemy import func, and_
+    
+    facts = db.session.query(
+        SourceMetricsDaily.source_label,
+        func.coalesce(func.sum(SourceMetricsDaily.leads), 0).label('leads'),
+        func.coalesce(func.sum(SourceMetricsDaily.cost_cents), 0).label('cost_cents'),
+        func.coalesce(func.sum(SourceMetricsDaily.orders_ok), 0).label('orders'),
+        func.coalesce(func.sum(SourceMetricsDaily.revenue_cents), 0).label('revenue_cents'),
+        func.coalesce(func.sum(SourceMetricsDaily.orders_value_sum_cents), 0).label('orders_value_sum_cents'),
+        func.coalesce(func.sum(SourceMetricsDaily.high_value_orders), 0).label('high_value_orders'),
+        func.coalesce(func.sum(SourceMetricsDaily.subscription_revenue_cents), 0).label('subscription_revenue_cents'),
+        func.coalesce(func.sum(SourceMetricsDaily.new_customers), 0).label('new_customers'),
+        func.coalesce(func.sum(SourceMetricsDaily.churn_events), 0).label('churn_customers')
+    ).filter(
+        and_(
+            SourceMetricsDaily.user_id == uid,
+            SourceMetricsDaily.day >= since,
+            SourceMetricsDaily.day <= until
+        )
+    ).group_by(SourceMetricsDaily.source_label).all()
 
-    # aggregate by source
-    sql = text("""
-        SELECT
-          smd.source_label AS source_label,
-          SUM(smd.leads) AS leads,
-          SUM(smd.customers) AS customers,
-          SUM(smd.orders) AS orders,
-          SUM(smd.revenue_cents) AS revenue_cents,
-          SUM(smd.cost_cents) AS cost_cents,
-          SUM(smd.churn_customers) AS churn_customers,
-          SUM(smd.total_customers) AS total_customers,
-          SUM(smd.exits_total) AS exits_total,
-          SUM(smd.new_customers) AS new_customers,
-          SUM(smd.repeat_customers) AS repeat_customers,
-          SUM(smd.unique_customers) AS unique_customers,
-          SUM(smd.active_customers) AS active_customers,
-          SUM(smd.reactivated_customers) AS reactivated_customers,
-          SUM(smd.at_risk_customers) AS at_risk_customers,
-          SUM(smd.subscription_revenue_cents) AS subscription_revenue_cents,
-          SUM(smd.high_value_orders) AS high_value_orders,
-          SUM(smd.customer_lifetime_days) AS total_customer_lifetime_days,
-          CASE
-            WHEN SUM(smd.cost_cents) = 0 THEN 0.0
-            ELSE ((SUM(smd.revenue_cents) - SUM(smd.cost_cents)) / SUM(smd.cost_cents)) * 100.0
-          END AS roi_pct,
-          CASE
-            WHEN SUM(smd.total_customers) = 0 THEN 0.0
-            ELSE (SUM(smd.churn_customers) / SUM(smd.total_customers)) * 100.0
-          END AS churn_pct,
-          CASE
-            WHEN SUM(smd.orders) = 0 THEN 0
-            ELSE SUM(smd.revenue_cents) / SUM(smd.orders)
-          END AS avg_order_value_cents,
-          CASE
-            WHEN SUM(smd.leads) = 0 THEN 0.0
-            ELSE (SUM(smd.orders) / SUM(smd.leads)) * 100.0
-          END AS conversion_rate_pct,
-          CASE
-            WHEN SUM(smd.unique_customers) = 0 THEN 0
-            ELSE SUM(smd.customer_lifetime_days) / SUM(smd.unique_customers)
-          END AS avg_customer_lifetime_days,
-          CASE
-            WHEN SUM(smd.total_customers) = 0 THEN 0.0
-            ELSE ((SUM(smd.total_customers) - SUM(smd.churn_customers)) / SUM(smd.total_customers)) * 100.0
-          END AS customer_retention_pct,
-          CASE
-            WHEN SUM(smd.unique_customers) = 0 THEN 0.0
-            ELSE (SUM(smd.revenue_cents) / 100.0) / SUM(smd.unique_customers)
-          END AS customer_ltv
-        FROM source_metrics_daily smd
-        WHERE smd.user_id = :uid
-          AND smd.day BETWEEN :since AND :until
-        GROUP BY smd.source_label
-        ORDER BY smd.source_label ASC
-    """)
-    rows = db.session.execute(sql, {"uid": uid, "since": d0, "until": d1}).mappings().all()
+    # ---------- Distinct customers present in range, per source ----------
+    # Customers "present in range" = distinct emails observed in customers_clean with day in range
+    cx_present_rows = db.session.query(
+        CustomersClean.source_label,
+        func.count(func.distinct(CustomersClean.email)).label('unique_customers')
+    ).filter(
+        and_(
+            CustomersClean.user_id == uid,
+            CustomersClean.day >= since,
+            CustomersClean.day <= until,
+            CustomersClean.email.isnot(None)
+        )
+    ).group_by(CustomersClean.source_label).all()
+    cx_present = {r.source_label or "Unknown": int(r.unique_customers or 0) for r in cx_present_rows}
 
-    # JSON-safe items
+    # ---------- Average lifetime (days) for customers present in range ----------
+    # Lifetime days ~= (until - first_seen_day) per customer; averaged per source over customers present in range.
+    lifetime_rows = db.session.execute(text("""
+      WITH first_seen AS (
+        SELECT user_id, source_label, email, MIN(day) AS first_day
+        FROM customers_clean
+        WHERE user_id = :uid AND email IS NOT NULL
+        GROUP BY user_id, source_label, email
+      ),
+      present AS (
+        SELECT DISTINCT source_label, email
+        FROM customers_clean
+        WHERE user_id = :uid AND day BETWEEN :since AND :until AND email IS NOT NULL
+      )
+      SELECT f.source_label,
+             AVG(DATEDIFF(:until, f.first_day) + 1) AS avg_lifetime_days,
+             SUM(DATEDIFF(:until, f.first_day) + 1) AS total_lifetime_days
+      FROM first_seen f
+      JOIN present p ON p.source_label = f.source_label AND p.email = f.email
+      GROUP BY f.source_label
+    """), {"uid": uid, "since": since, "until": until}).fetchall()
+    avg_lifetime = {r.source_label or "Unknown": float(r.avg_lifetime_days or 0.0) for r in lifetime_rows}
+    total_lifetime = {r.source_label or "Unknown": int(r.total_lifetime_days or 0) for r in lifetime_rows}
+
+    # ---------- Assemble items ----------
+    def _safe_pct(num: float, den: float) -> float:
+        return 0.0 if den <= 0 else (num / den) * 100.0
+
     items = []
-    for r in rows:
-        items.append({
-            "source_label": str(r["source_label"] or "Unknown"),
-            "leads": _as_int(r["leads"]),
-            "customers": _as_int(r["customers"]),
-            "orders": _as_int(r["orders"]),
-            "revenue_cents": _as_int(r["revenue_cents"]),
-            "cost_cents": _as_int(r["cost_cents"]),
-            "churn_customers": _as_int(r["churn_customers"]),
-            "total_customers": _as_int(r["total_customers"]),
-            "exits_total": _as_int(r["exits_total"]),
-            "new_customers": _as_int(r["new_customers"]),
-            "repeat_customers": _as_int(r["repeat_customers"]),
-            "unique_customers": _as_int(r["unique_customers"]),
-            "active_customers": _as_int(r["active_customers"]),
-            "reactivated_customers": _as_int(r["reactivated_customers"]),
-            "at_risk_customers": _as_int(r["at_risk_customers"]),
-            "subscription_revenue_cents": _as_int(r["subscription_revenue_cents"]),
-            "high_value_orders": _as_int(r["high_value_orders"]),
-            "total_customer_lifetime_days": _as_int(r["total_customer_lifetime_days"]),
-            "avg_customer_lifetime_days": _as_int(r["avg_customer_lifetime_days"]),
-            "roi_pct": _as_float(r["roi_pct"]),
-            "churn_pct": _as_float(r["churn_pct"]),
-            "avg_order_value_cents": _as_int(r["avg_order_value_cents"]),
-            "conversion_rate_pct": _as_float(r["conversion_rate_pct"]),
-            "customer_retention_pct": _as_float(r["customer_retention_pct"]),
-            "customer_ltv": _as_float(r["customer_ltv"]),
-        })
-
-    # totals (then compute pct with Decimal -> float)
-    tot_sql = text("""
-        SELECT
-          SUM(leads) AS leads,
-          SUM(customers) AS customers,
-          SUM(orders) AS orders,
-          SUM(revenue_cents) AS revenue_cents,
-          SUM(cost_cents) AS cost_cents,
-          SUM(churn_customers) AS churn_customers,
-          SUM(total_customers) AS total_customers,
-          SUM(exits_total) AS exits_total,
-          SUM(new_customers) AS new_customers,
-          SUM(repeat_customers) AS repeat_customers,
-          SUM(unique_customers) AS unique_customers,
-          SUM(active_customers) AS active_customers,
-          SUM(reactivated_customers) AS reactivated_customers,
-          SUM(at_risk_customers) AS at_risk_customers,
-          SUM(subscription_revenue_cents) AS subscription_revenue_cents,
-          SUM(high_value_orders) AS high_value_orders,
-          SUM(customer_lifetime_days) AS total_customer_lifetime_days,
-          CASE
-            WHEN SUM(orders) = 0 THEN 0
-            ELSE SUM(revenue_cents) / SUM(orders)
-          END AS avg_order_value_cents,
-          CASE
-            WHEN SUM(unique_customers) = 0 THEN 0
-            ELSE SUM(customer_lifetime_days) / SUM(unique_customers)
-          END AS avg_customer_lifetime_days,
-          CASE
-            WHEN SUM(unique_customers) = 0 THEN 0.0
-            ELSE (SUM(revenue_cents) / 100.0) / SUM(unique_customers)
-          END AS customer_ltv
-        FROM source_metrics_daily
-        WHERE user_id = :uid AND day BETWEEN :since AND :until
-    """)
-    t = db.session.execute(tot_sql, {"uid": uid, "since": d0, "until": d1}).mappings().first() or {}
-
-    totals = {
-        "leads": _as_int(t.get("leads")),
-        "customers": _as_int(t.get("customers")),
-        "orders": _as_int(t.get("orders")),
-        "revenue_cents": _as_int(t.get("revenue_cents")),
-        "cost_cents": _as_int(t.get("cost_cents")),
-        "churn_customers": _as_int(t.get("churn_customers")),
-        "total_customers": _as_int(t.get("total_customers")),
-        "exits_total": _as_int(t.get("exits_total")),
-        "new_customers": _as_int(t.get("new_customers")),
-        "repeat_customers": _as_int(t.get("repeat_customers")),
-        "unique_customers": _as_int(t.get("unique_customers")),
-        "active_customers": _as_int(t.get("active_customers")),
-        "reactivated_customers": _as_int(t.get("reactivated_customers")),
-        "at_risk_customers": _as_int(t.get("at_risk_customers")),
-        "subscription_revenue_cents": _as_int(t.get("subscription_revenue_cents")),
-        "high_value_orders": _as_int(t.get("high_value_orders")),
-        "total_customer_lifetime_days": _as_int(t.get("total_customer_lifetime_days")),
-        "avg_order_value_cents": _as_int(t.get("avg_order_value_cents")),
-        "avg_customer_lifetime_days": _as_int(t.get("avg_customer_lifetime_days")),
-        "customer_ltv": _as_float(t.get("customer_ltv")),
+    totals_acc = {
+        "leads": 0, "customers": 0, "orders": 0,
+        "revenue_cents": 0, "cost_cents": 0,
+        "churn_customers": 0, "total_customers": 0,
+        "exits_total": 0,
+        "new_customers": 0, "repeat_customers": 0,
+        "unique_customers": 0, "active_customers": 0,
+        "reactivated_customers": 0, "at_risk_customers": 0,
+        "subscription_revenue_cents": 0, "high_value_orders": 0,
+        "total_customer_lifetime_days": 0, "avg_order_value_cents": 0,
+        "avg_customer_lifetime_days": 0, "customer_ltv": 0.0,
+        "roi_pct": 0.0, "churn_pct": 0.0,
+        "conversion_rate_pct": 0.0, "customer_retention_pct": 0.0,
     }
 
-    rc = _D(totals["revenue_cents"])
-    cc = _D(totals["cost_cents"])
-    ch = _D(totals["churn_customers"])
-    tc = _D(totals["total_customers"])
-    ld = _D(totals["leads"])
-    od = _D(totals["orders"])
-    hundred = Decimal("100")
+    for r in facts:
+        src = r.source_label or "Unknown"
+        leads = int(r.leads or 0)
+        orders = int(r.orders or 0)
+        rev = int(r.revenue_cents or 0)
+        cost = int(r.cost_cents or 0)
+        o_sum = int(r.orders_value_sum_cents or 0)
+        hv = int(r.high_value_orders or 0)
+        sub = int(r.subscription_revenue_cents or 0)
+        new_cx = int(r.new_customers or 0)
+        churn = int(r.churn_customers or 0)
+        uniq = int(cx_present.get(src, 0))
+        avg_life = float(avg_lifetime.get(src, 0.0))
+        tot_life = int(total_lifetime.get(src, 0))
 
-    totals["roi_pct"] = float(Decimal(0) if cc == 0 else ((rc - cc) * hundred) / cc)
-    totals["churn_pct"] = float(Decimal(0) if tc == 0 else (ch * hundred) / tc)
-    totals["conversion_rate_pct"] = float(Decimal(0) if ld == 0 else (od * hundred) / ld)
-    totals["customer_retention_pct"] = float(hundred - _D(totals["churn_pct"]))
-    
-    # High-value order percentage
-    total_orders = _D(totals["orders"])
-    high_val_orders = _D(totals["high_value_orders"])
-    totals["high_value_order_pct"] = float(Decimal(0) if total_orders == 0 else (high_val_orders * hundred) / total_orders)
-    
-    # Subscription revenue percentage
-    totals["subscription_revenue_pct"] = float(Decimal(0) if rc == 0 else (_D(totals["subscription_revenue_cents"]) * hundred) / rc)
+        avg_aov = int(o_sum / orders) if orders > 0 else 0
+        roi_pct = 0.0 if cost <= 0 else ((rev - cost) / cost) * 100.0
+        conv_pct = _safe_pct(orders, leads)
+        churn_pct = _safe_pct(churn, uniq)
+        retention_pct = 100.0 - churn_pct if uniq > 0 else 0.0
+        # Customer LTV (displayed as dollars in the UI) -> revenue / unique_customers
+        customer_ltv = (rev / 100.0 / uniq) if uniq > 0 else 0.0
+
+        items.append({
+            "source_label": src,
+            "leads": leads,
+            "customers": uniq,  # funnel uses customers present in range
+            "orders": orders,
+            "revenue_cents": rev,
+            "cost_cents": cost,
+            "churn_customers": churn,
+            "total_customers": uniq,
+            "exits_total": churn,  # align with prior semantics
+            "new_customers": new_cx,
+            "repeat_customers": max(0, uniq - new_cx),
+            "unique_customers": uniq,
+            "active_customers": 0,         # optional enhancements later
+            "reactivated_customers": 0,    # optional enhancements later
+            "at_risk_customers": 0,        # optional enhancements later
+            "subscription_revenue_cents": sub,
+            "high_value_orders": hv,
+            "total_customer_lifetime_days": tot_life,
+            "avg_customer_lifetime_days": avg_life,
+            "roi_pct": roi_pct,
+            "churn_pct": churn_pct,
+            "avg_order_value_cents": avg_aov,
+            "conversion_rate_pct": conv_pct,
+            "customer_retention_pct": retention_pct,
+            "customer_ltv": customer_ltv,
+        })
+
+        # accumulate for totals
+        totals_acc["leads"] += leads
+        totals_acc["customers"] += uniq
+        totals_acc["orders"] += orders
+        totals_acc["revenue_cents"] += rev
+        totals_acc["cost_cents"] += cost
+        totals_acc["churn_customers"] += churn
+        totals_acc["total_customers"] += uniq
+        totals_acc["new_customers"] += new_cx
+        totals_acc["repeat_customers"] += max(0, uniq - new_cx)
+        totals_acc["unique_customers"] += uniq
+        totals_acc["subscription_revenue_cents"] += sub
+        totals_acc["high_value_orders"] += hv
+        totals_acc["total_customer_lifetime_days"] += tot_life
+
+    # totals-level deriveds
+    orders_t = totals_acc["orders"]
+    leads_t = totals_acc["leads"]
+    uniq_t = totals_acc["unique_customers"]
+    cost_t = totals_acc["cost_cents"]
+    rev_t = totals_acc["revenue_cents"]
+    o_sum_t = db.session.execute(text("""
+      SELECT COALESCE(SUM(orders_value_sum_cents),0)
+      FROM source_metrics_daily_v2
+      WHERE user_id = :uid AND day BETWEEN :since AND :until
+    """), {"uid": uid, "since": since, "until": until}).scalar() or 0
+
+    totals_acc["avg_order_value_cents"] = int(o_sum_t / orders_t) if orders_t > 0 else 0
+    totals_acc["roi_pct"] = 0.0 if cost_t <= 0 else ((rev_t - cost_t) / cost_t) * 100.0
+    totals_acc["conversion_rate_pct"] = (orders_t * 100.0 / leads_t) if leads_t > 0 else 0.0
+    totals_acc["churn_pct"] = (totals_acc["churn_customers"] * 100.0 / uniq_t) if uniq_t > 0 else 0.0
+    totals_acc["customer_retention_pct"] = 100.0 - totals_acc["churn_pct"] if uniq_t > 0 else 0.0
+    totals_acc["avg_customer_lifetime_days"] = (
+        totals_acc["total_customer_lifetime_days"] / uniq_t if uniq_t > 0 else 0.0
+    )
+    totals_acc["customer_ltv"] = (rev_t / 100.0 / uniq_t) if uniq_t > 0 else 0.0
+    totals_acc["subscription_revenue_pct"] = (
+        (totals_acc["subscription_revenue_cents"] * 100.0 / rev_t) if rev_t > 0 else 0.0
+    )
+    totals_acc["high_value_order_pct"] = (
+        (totals_acc["high_value_orders"] * 100.0 / orders_t) if orders_t > 0 else 0.0
+    )
 
     return jsonify({
-        "range": {"since": d0.isoformat(), "until": d1.isoformat()},
+        "range": {"since": since, "until": until},
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "items": items,
-        "totals": totals,
-    })
+        "totals": totals_acc,
+    }), 200
+
+

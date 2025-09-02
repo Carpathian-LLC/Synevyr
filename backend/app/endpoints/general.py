@@ -22,8 +22,6 @@ from flask import current_app as app
 from app.extensions import csrf, limiter, db, mail
 from flask import current_app
 
-from app.models.general import BadgeDefinition, EarnedBadge
-from app.models.general import Notification, NotificationLocation
 from app.models.logging import FailedLoginAttempt, HoneypotLog
 from app.models.user import Customer, Referral, User
 from app.models.plan import Plan
@@ -31,7 +29,7 @@ from app.models.plan import Plan
 from app.utils.security import authorizeUser
 from app.utils.helpers import generate_referral_code, hash_input, validate_email_format, validate_password, validate_username
 from app.utils.logging import log_activity, logger, bad_url_logger
-from app.utils.notifications import award_badge_by_name, notify_user_login, send_email_verification, send_referral_invitation_email
+from app.utils.notifications import notify_user_login, send_email_verification, send_referral_invitation_email
 
 # ------------------------------------------------------------------------------------
 # Vars
@@ -462,14 +460,15 @@ def send_referral_email():
         
         # Award if user sends to themselves
         if recipient_email.lower() == referrer.customer.email.lower():
-            award_badge_by_name(referrer, "Solo Sales Team")
+            # award_badge_by_name(referrer, "Solo Sales Team")  # TODO: implement badges
             return jsonify({"error": "Bold move trying to refer yourself. We admire the hustle, but self-referrals don't count. Try making a friend instead."}), 400
 
         # Award first-time referral
         def has_sent_any_referrals(user_id):
             return db.session.query(Referral).filter_by(referrer_id=user_id).count() > 0
         if not has_sent_any_referrals(referrer.id):
-            award_badge_by_name(referrer, "First Referral Sent")
+            # award_badge_by_name(referrer, "First Referral Sent")  # TODO: implement badges
+            pass
 
         # Award for trying to refer the same person
         existing = db.session.query(Referral).filter_by(
@@ -478,7 +477,7 @@ def send_referral_email():
         ).first()
         if existing:
             # Award badge for trying to refer same person
-            award_badge_by_name(referrer, "Spammy McSpammerson")
+            # award_badge_by_name(referrer, "Spammy McSpammerson")  # TODO: implement badges
             return jsonify({"error": "Whoa there, social butterfly - You already shot your shot with this email. Don't make it weird."}), 400
 
 
@@ -497,68 +496,6 @@ def send_referral_email():
         logger.error(f"Error sending referral email: {e}", exc_info=True)
         return jsonify({"error": "Failed to send referral email"}), 500
 
-@general_bp.route("/badges/earned", methods=["GET"])
-def get_earned_badges():
-    user_id = authorizeUser()
-    logger.info(f"Fetching earned badges for user_id={user_id}")
-
-    try:
-        # Join EarnedBadge with BadgeDefinition
-        results = (
-            db.session.query(EarnedBadge, BadgeDefinition)
-            .join(BadgeDefinition, EarnedBadge.badge_id == BadgeDefinition.id)
-            .filter(EarnedBadge.user_id == user_id)
-            .order_by(desc(EarnedBadge.earned_on))
-            .all()
-        )
-
-        logger.info(f"Found {len(results)} earned badges for user_id={user_id}")
-
-        serialized_badges = [
-            {
-                "id": badge.id,
-                "badge_name": badge.name,
-                "description": badge.description,
-                "icon_url": badge.icon_url,
-                "category": badge.category,
-                "earned_on": earned.earned_on.isoformat() if earned.earned_on else None
-            }
-            for earned, badge in results
-        ]
-
-        return jsonify(serialized_badges), 200
-
-    except Exception as e:
-        logger.error(f"Error retrieving earned badges for user_id={user_id}: {e}", exc_info=True)
-        return jsonify({"error": "Could not retrieve badges."}), 500
-
-@general_bp.route("/badges/definitions", methods=["GET"])
-def get_badge_definitions():
-    user_id = authorizeUser()
-    logger.info(f"[get_badge_definitions] start – user_id={user_id}")
-    start_ts = time.time()
-    try:
-        defs = BadgeDefinition.query.order_by(BadgeDefinition.name).all()
-        logger.debug(f"[get_badge_definitions] query returned {len(defs)} rows")
-        
-        serialized = []
-        for d in defs:
-            serialized.append({
-                "id":          d.id,
-                "name":        d.name,
-                "description": d.description,
-                "icon_url":    d.icon_url
-            })
-        logger.info(f"[get_badge_definitions] serialized {len(serialized)} definitions for user {user_id}")
-        
-        duration = (time.time() - start_ts) * 1000
-        logger.info(f"[get_badge_definitions] success – duration={duration:.1f}ms")
-        return jsonify(serialized), 200
-
-    except Exception:
-        logger.exception(f"[get_badge_definitions] failure for user {user_id}")
-        return jsonify({"error": "Could not load badge definitions."}), 500
-    
 @general_bp.route("/meta/version", methods=["GET"])
 def version_info():
     def parse_items(raw_text):
@@ -593,83 +530,3 @@ def version_info():
         "backend_version": BACKEND_VERSION,
         "frontend_version": FRONTEND_VERSION,
     })
-
-@general_bp.route("/settings/notifications", methods=["GET", "POST", "DELETE"])
-@csrf.exempt
-def manage_notifications():
-    user_id = authorizeUser()
-    logger.info(f"User {user_id} is attempting to manage system_notifications")
-
-    # --- LIST ---
-    if request.method == "GET":
-        all_notifs = Notification.query.all()
-        return jsonify({
-            "notifications": [
-                {
-                    "location": n.display_location.value,
-                    "message": n.message,
-                    "severity": n.severity,
-                    "created_at": n.created_at.isoformat(),
-                    "updated_at": n.updated_at.isoformat(),
-                }
-                for n in all_notifs
-            ]
-        }), 200
-
-    data = request.get_json() or {}
-    loc = data.get("location")
-    if not loc:
-        return jsonify({"error": "location is required"}), 400
-
-    try:
-        loc_enum = NotificationLocation(loc)
-    except ValueError:
-        return jsonify({"error": "Invalid location"}), 400
-
-    # --- CREATE / UPDATE ---
-    if request.method == "POST":
-        msg = data.get("message", "").strip()
-        if not msg:
-            return jsonify({"error": "message is required"}), 400
-
-        severity = int(data.get("severity", 0))
-
-        existing = Notification.query.filter_by(display_location=loc_enum).first()
-        if existing:
-            existing.message = msg
-            existing.severity = severity
-        else:
-            new_notif = Notification(
-                display_location=loc_enum,
-                message=msg,
-                severity=severity
-            )
-            db.session.add(new_notif)
-
-        db.session.commit()
-        return jsonify({"success": True}), 201
-
-    # --- DELETE ---
-    if request.method == "DELETE":
-        existing = Notification.query.filter_by(display_location=loc_enum).first()
-        if existing:
-            db.session.delete(existing)
-            db.session.commit()
-        return jsonify({"success": True}), 200
-
-@general_bp.route("/notifications/<string:location>", methods=["GET"])
-def get_notification(location):
-    # public, read-only
-    try:
-        loc_enum = NotificationLocation(location)
-    except ValueError:
-        return jsonify({"message": None}), 404
-
-    notif = Notification.query.filter_by(display_location=loc_enum).first()
-    if notif:
-        return jsonify({
-            "message": notif.message,
-            "severity": notif.severity
-        }), 200
-
-    return jsonify({"message": None}), 200
